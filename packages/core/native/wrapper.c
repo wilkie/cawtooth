@@ -48,6 +48,35 @@ CAWTOOTH_EXPORT void cawtooth_opl_generate(opl3_chip* chip, int16_t* buf, uint32
     OPL3_GenerateStream(chip, buf, num_samples);
 }
 
+/*
+ * Fill `stereo_buf` with mixed output AND `channels_buf` with per-voice output
+ * for each of the 18 OPL3 channels (9 for OPL2, upper 9 stay silent in OPL2
+ * mode).
+ *
+ * channels_buf layout is frame-interleaved: [frame0_ch0, frame0_ch1, ...,
+ * frame0_ch17, frame1_ch0, ...]. Caller must ensure:
+ *   stereo_buf   length >= num_samples * 2
+ *   channels_buf length >= num_samples * 18
+ *
+ * Per-channel values are snapshots taken at the native OPL rate during each
+ * resampled output sample — they track the stereo mix with at most one native
+ * sample of lag (see cawtooth patch to opl3.c).
+ */
+CAWTOOTH_EXPORT void cawtooth_opl_generate_channels(
+    opl3_chip* chip,
+    int16_t* stereo_buf,
+    int16_t* channels_buf,
+    uint32_t num_samples
+) {
+    for (uint32_t i = 0; i < num_samples; i++) {
+        OPL3_GenerateResampled(chip, &stereo_buf[i * 2]);
+        int16_t* ch_out = &channels_buf[i * 18];
+        for (int c = 0; c < 18; c++) {
+            ch_out[c] = chip->channelsamples[c];
+        }
+    }
+}
+
 CAWTOOTH_EXPORT uint32_t cawtooth_opl_chip_size(void) {
     return (uint32_t)sizeof(opl3_chip);
 }

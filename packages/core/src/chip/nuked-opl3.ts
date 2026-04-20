@@ -1,4 +1,4 @@
-import type { OplChip } from './types.js';
+import { OPL_CHANNEL_COUNT, type OplChip } from './types.js';
 import { asNukedOpl3Exports, type NukedOpl3Exports } from './loader.js';
 
 const INT16_TO_FLOAT = 1 / 32768;
@@ -17,7 +17,8 @@ export class NukedOpl3Chip implements OplChip {
 
   private readonly exports: NukedOpl3Exports;
   private readonly chipPtr: number;
-  private scratchPtr: number;
+  private stereoPtr: number;
+  private channelsPtr: number;
   private scratchFrames: number;
   private disposed = false;
 
@@ -35,10 +36,11 @@ export class NukedOpl3Chip implements OplChip {
     this.chipPtr = chipPtr;
 
     this.scratchFrames = INITIAL_SCRATCH_FRAMES;
-    this.scratchPtr = this.exports.malloc(this.scratchFrames * 2 * 2);
-    if (!this.scratchPtr) {
+    this.stereoPtr = this.exports.malloc(this.scratchFrames * 2 * 2);
+    this.channelsPtr = this.exports.malloc(this.scratchFrames * OPL_CHANNEL_COUNT * 2);
+    if (!this.stereoPtr || !this.channelsPtr) {
       this.exports.cawtooth_opl_destroy(chipPtr);
-      throw new Error('cawtooth: failed to allocate sample scratch buffer');
+      throw new Error('cawtooth: failed to allocate sample scratch buffers');
     }
   }
 
@@ -48,26 +50,59 @@ export class NukedOpl3Chip implements OplChip {
 
   generate(output: Float32Array): void {
     const numFrames = output.length >>> 1;
-    if (numFrames === 0) {
-      return;
-    }
+    if (numFrames === 0) return;
 
-    if (numFrames > this.scratchFrames) {
-      this.exports.free(this.scratchPtr);
-      this.scratchFrames = numFrames;
-      this.scratchPtr = this.exports.malloc(numFrames * 2 * 2);
-      if (!this.scratchPtr) {
-        throw new Error('cawtooth: failed to grow sample scratch buffer');
-      }
-    }
-
-    this.exports.cawtooth_opl_generate(this.chipPtr, this.scratchPtr, numFrames);
+    this.growScratch(numFrames);
+    this.exports.cawtooth_opl_generate(this.chipPtr, this.stereoPtr, numFrames);
 
     // Re-acquire the view each call: wasm memory may have been detached
     // and replaced if anything triggered a grow between calls.
-    const view = new Int16Array(this.exports.memory.buffer, this.scratchPtr, numFrames * 2);
+    const view = new Int16Array(this.exports.memory.buffer, this.stereoPtr, numFrames * 2);
     for (let i = 0; i < view.length; i++) {
       output[i] = view[i] * INT16_TO_FLOAT;
+    }
+  }
+
+  /**
+   * Fill both a stereo output buffer and a per-voice buffer in one pass.
+   *
+   * `channelsOutput` layout is frame-interleaved: `[f0_ch0, f0_ch1, ...,
+   * f0_ch17, f1_ch0, ...]`. Its length must be `numFrames * 18`, where
+   * `numFrames = stereoOutput.length / 2`.
+   *
+   * Per-channel values are the pre-pan operator sum for each voice, snapshotted
+   * at the native OPL rate inside the mix loop (see the cawtooth Nuked patch).
+   * They lag the stereo mix by at most one native sample and ignore the
+   * per-channel CHA-CHD routing bits, so visualizers see voices independent of
+   * whether they're routed to the main output.
+   */
+  generateWithChannels(stereoOutput: Float32Array, channelsOutput: Float32Array): void {
+    const numFrames = stereoOutput.length >>> 1;
+    if (numFrames === 0) return;
+    if (channelsOutput.length < numFrames * OPL_CHANNEL_COUNT) {
+      throw new Error(
+        `cawtooth: channelsOutput must hold numFrames * ${OPL_CHANNEL_COUNT} samples ` +
+          `(got ${channelsOutput.length}, need ${numFrames * OPL_CHANNEL_COUNT})`,
+      );
+    }
+
+    this.growScratch(numFrames);
+    this.exports.cawtooth_opl_generate_channels(
+      this.chipPtr,
+      this.stereoPtr,
+      this.channelsPtr,
+      numFrames,
+    );
+
+    const mem = this.exports.memory.buffer;
+    const stereoView = new Int16Array(mem, this.stereoPtr, numFrames * 2);
+    for (let i = 0; i < stereoView.length; i++) {
+      stereoOutput[i] = stereoView[i] * INT16_TO_FLOAT;
+    }
+
+    const chView = new Int16Array(mem, this.channelsPtr, numFrames * OPL_CHANNEL_COUNT);
+    for (let i = 0; i < chView.length; i++) {
+      channelsOutput[i] = chView[i] * INT16_TO_FLOAT;
     }
   }
 
@@ -76,11 +111,22 @@ export class NukedOpl3Chip implements OplChip {
   }
 
   dispose(): void {
-    if (this.disposed) {
-      return;
-    }
+    if (this.disposed) return;
     this.disposed = true;
-    this.exports.free(this.scratchPtr);
+    this.exports.free(this.stereoPtr);
+    this.exports.free(this.channelsPtr);
     this.exports.cawtooth_opl_destroy(this.chipPtr);
+  }
+
+  private growScratch(numFrames: number): void {
+    if (numFrames <= this.scratchFrames) return;
+    this.exports.free(this.stereoPtr);
+    this.exports.free(this.channelsPtr);
+    this.scratchFrames = numFrames;
+    this.stereoPtr = this.exports.malloc(numFrames * 2 * 2);
+    this.channelsPtr = this.exports.malloc(numFrames * OPL_CHANNEL_COUNT * 2);
+    if (!this.stereoPtr || !this.channelsPtr) {
+      throw new Error('cawtooth: failed to grow sample scratch buffers');
+    }
   }
 }

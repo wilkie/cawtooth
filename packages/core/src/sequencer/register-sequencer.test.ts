@@ -4,12 +4,14 @@ import { dirname, resolve } from 'node:path';
 
 import { NukedOpl3Chip } from '../chip/nuked-opl3.js';
 import { createNukedOpl3Imports } from '../chip/loader.js';
+import { OPL_CHANNEL_COUNT } from '../chip/types.js';
 import { TEST_TONE_WRITES } from '../chip/__fixtures__/test-tone.js';
 import { RegisterSequencer } from './register-sequencer.js';
 import type { RegisterEventStream } from './types.js';
 
 const SAMPLE_RATE = 48000;
 const TICK_RATE = 700;
+const NUM_FRAMES = 1024;
 
 function peakAmplitude(buf: Float32Array, start = 0, end = buf.length): number {
   let peak = 0;
@@ -197,5 +199,78 @@ describe('RegisterSequencer', () => {
     expect(() => seq.loadStream(stream, { tickRate: 0 })).toThrow();
     expect(() => seq.loadStream(stream, { tickRate: -1 })).toThrow();
     chip.dispose();
+  });
+
+  describe('generateWithChannels', () => {
+    it('isolates per-voice output while firing events', () => {
+      const chip = makeChip();
+      const seq = new RegisterSequencer(chip);
+      const stream = makeStream(TEST_TONE_WRITES.map((w) => [w.reg, w.value, 0] as const));
+      seq.loadStream(stream, { tickRate: TICK_RATE });
+      seq.play();
+
+      const stereo = new Float32Array(NUM_FRAMES * 2);
+      const channels = new Float32Array(NUM_FRAMES * OPL_CHANNEL_COUNT);
+      seq.generateWithChannels(stereo, channels);
+
+      expect(peakAmplitude(stereo)).toBeGreaterThan(0.01);
+
+      // Channel 0 has audio; all other voices are silent (only ch0 was keyed).
+      let ch0Peak = 0;
+      let otherPeak = 0;
+      for (let f = 0; f < NUM_FRAMES; f++) {
+        for (let v = 0; v < OPL_CHANNEL_COUNT; v++) {
+          const s = Math.abs(channels[f * OPL_CHANNEL_COUNT + v]);
+          if (v === 0) {
+            if (s > ch0Peak) ch0Peak = s;
+          } else if (s > otherPeak) {
+            otherPeak = s;
+          }
+        }
+      }
+      expect(ch0Peak).toBeGreaterThan(0.01);
+      expect(otherPeak).toBe(0);
+      chip.dispose();
+    });
+
+    it('produces identical stereo output to plain generate() for the same stream', () => {
+      // Two sequencers running the same stream. If the render loop is shared
+      // correctly, the stereo halves must match bit-for-bit.
+      const chipA = makeChip();
+      const chipB = makeChip();
+      const seqA = new RegisterSequencer(chipA);
+      const seqB = new RegisterSequencer(chipB);
+      const stream = makeStream(TEST_TONE_WRITES.map((w) => [w.reg, w.value, 0] as const));
+      seqA.loadStream(stream, { tickRate: TICK_RATE });
+      seqB.loadStream(stream, { tickRate: TICK_RATE });
+      seqA.play();
+      seqB.play();
+
+      const stereoA = new Float32Array(NUM_FRAMES * 2);
+      seqA.generate(stereoA);
+
+      const stereoB = new Float32Array(NUM_FRAMES * 2);
+      const channelsB = new Float32Array(NUM_FRAMES * OPL_CHANNEL_COUNT);
+      seqB.generateWithChannels(stereoB, channelsB);
+
+      for (let i = 0; i < stereoA.length; i++) {
+        expect(stereoB[i]).toBe(stereoA[i]);
+      }
+
+      chipA.dispose();
+      chipB.dispose();
+    });
+
+    it('rejects an undersized channels buffer', () => {
+      const chip = makeChip();
+      const seq = new RegisterSequencer(chip);
+      const stream = makeStream(TEST_TONE_WRITES.map((w) => [w.reg, w.value, 0] as const));
+      seq.loadStream(stream, { tickRate: TICK_RATE });
+      seq.play();
+      const stereo = new Float32Array(NUM_FRAMES * 2);
+      const undersized = new Float32Array(NUM_FRAMES * OPL_CHANNEL_COUNT - 1);
+      expect(() => seq.generateWithChannels(stereo, undersized)).toThrow();
+      chip.dispose();
+    });
   });
 });

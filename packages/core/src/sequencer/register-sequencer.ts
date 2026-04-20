@@ -1,5 +1,7 @@
-import type { OplChip } from '../chip/types.js';
+import { OPL_CHANNEL_COUNT, type OplChip } from '../chip/types.js';
 import type { RegisterEventStream, RegisterStreamTiming } from './types.js';
+
+type RenderChunk = (startFrame: number, frameCount: number) => void;
 
 /**
  * Drives an OPL chip from a RegisterEventStream in sample-accurate time.
@@ -97,7 +99,40 @@ export class RegisterSequencer {
 
   /** Fill `output` (stereo interleaved) with audio, firing events in sync. */
   generate(output: Float32Array): void {
-    const totalFrames = output.length >>> 1;
+    this.render(output.length >>> 1, (start, frames) => {
+      this.chip.generate(output.subarray(start * 2, (start + frames) * 2));
+    });
+  }
+
+  /**
+   * Like `generate()`, but also fills a per-voice buffer in one pass.
+   *
+   * `channelsOutput` layout: frame-interleaved, total length
+   * `numFrames * OPL_CHANNEL_COUNT`. See `OplChip.generateWithChannels` for
+   * the per-voice semantics (pre-pan, not routed through the mix mask).
+   */
+  generateWithChannels(stereoOutput: Float32Array, channelsOutput: Float32Array): void {
+    const totalFrames = stereoOutput.length >>> 1;
+    if (channelsOutput.length < totalFrames * OPL_CHANNEL_COUNT) {
+      throw new Error(
+        `cawtooth: channelsOutput must hold numFrames * ${OPL_CHANNEL_COUNT} samples`,
+      );
+    }
+    this.render(totalFrames, (start, frames) => {
+      this.chip.generateWithChannels(
+        stereoOutput.subarray(start * 2, (start + frames) * 2),
+        channelsOutput.subarray(start * OPL_CHANNEL_COUNT, (start + frames) * OPL_CHANNEL_COUNT),
+      );
+    });
+  }
+
+  /**
+   * Shared render loop. Handles loop-point rewind, event dispatch, and
+   * chunking up to the next event boundary. Delegates actual sample
+   * production to `renderChunk`, which knows whether per-voice output is
+   * wanted and sources the appropriate sub-views.
+   */
+  private render(totalFrames: number, renderChunk: RenderChunk): void {
     let produced = 0;
 
     while (produced < totalFrames) {
@@ -137,7 +172,7 @@ export class RegisterSequencer {
       }
       if (chunk < 1) chunk = 1;
 
-      this.chip.generate(output.subarray(produced * 2, (produced + chunk) * 2));
+      renderChunk(produced, chunk);
       produced += chunk;
       if (this.playing) {
         this.currentSample += chunk;

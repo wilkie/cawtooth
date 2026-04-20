@@ -36,6 +36,7 @@ EXPORTS='[
   "_cawtooth_opl_reset",
   "_cawtooth_opl_write",
   "_cawtooth_opl_generate",
+  "_cawtooth_opl_generate_channels",
   "_cawtooth_opl_chip_size",
   "_malloc",
   "_free"

@@ -17,6 +17,12 @@ export interface NukedOpl3Exports {
   readonly cawtooth_opl_reset: (chipPtr: number, sampleRate: number) => void;
   readonly cawtooth_opl_write: (chipPtr: number, reg: number, value: number) => void;
   readonly cawtooth_opl_generate: (chipPtr: number, bufPtr: number, numFrames: number) => void;
+  readonly cawtooth_opl_generate_channels: (
+    chipPtr: number,
+    stereoPtr: number,
+    channelsPtr: number,
+    numFrames: number,
+  ) => void;
   readonly cawtooth_opl_chip_size: () => number;
 }
 

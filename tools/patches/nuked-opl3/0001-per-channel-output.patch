@@ -1,0 +1,31 @@
+diff --git a/opl3.c b/opl3.c
+index 178aaa4..89b0290 100644
+--- a/opl3.c
++++ b/opl3.c
+@@ -1136,6 +1136,8 @@ inline void OPL3_Generate4Ch(opl3_chip *chip, int16_t *buf4)
+         channel = &chip->channel[ii];
+         out = channel->out;
+         accm = *out[0] + *out[1] + *out[2] + *out[3];
++        /* cawtooth patch: snapshot per-channel pre-pan output for taps. */
++        chip->channelsamples[ii] = accm;
+ #if OPL_ENABLE_STEREOEXT
+         mix[0] += (int16_t)((accm * channel->leftpan) >> 16);
+ #else
+diff --git a/opl3.h b/opl3.h
+index 0312692..cca275c 100644
+--- a/opl3.h
++++ b/opl3.h
+@@ -153,6 +153,13 @@ struct _opl3_chip {
+     uint32_t writebuf_last;
+     uint64_t writebuf_lasttime;
+     opl3_writebuf writebuf[OPL_WRITEBUF_SIZE];
++
++    /* cawtooth patch: per-channel pre-pan output from the most recent
++     * OPL3_Generate4Ch call. Exposed so callers can tap individual voices
++     * for visualization (oscilloscope, FFT) without re-running the emulator.
++     * Value is each channel's summed operator output (accm) at native rate.
++     */
++    int16_t channelsamples[18];
+ };
+ 
+ void OPL3_Generate(opl3_chip *chip, int16_t *buf);

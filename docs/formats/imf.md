@@ -104,17 +104,48 @@ When in doubt, 700 Hz is the most common guess, but the result is noticeably slo
 ### Example
 
 ```ts
-import { parseImf, RegisterSequencer, NukedOpl3Chip } from 'cawtooth';
+import { OplPlayer, parseImf } from 'cawtooth';
+import workletUrl from 'cawtooth/worklet?url';
+import wasmUrl from 'cawtooth/wasm/nuked-opl3.wasm?url';
+
+const player = await OplPlayer.create({ workletUrl, wasmUrl });
+player.output.connect(player.audioContext.destination);
+await player.resume();
 
 const bytes = new Uint8Array(await (await fetch('WONDERIN.WLF')).arrayBuffer());
 const song = parseImf(bytes);
 
 // .WLF → Wolfenstein 3D → 700 Hz.
-sequencer.loadStream(song.stream, { tickRate: 700, loop: true });
-sequencer.play();
+player.loadStream(song.stream, { tickRate: 700, loop: true });
+player.play();
 
 // Metadata is optional and may be undefined.
 console.log(song.title, song.source, song.remarks);
+```
+
+For a working end-to-end demo (file input, tick-rate selector, loop toggle, metadata display), see [`examples/imf/`](../../examples/imf/).
+
+#### Direct sequencer use (Node, offline rendering)
+
+`RegisterSequencer` is also usable outside the worklet — handy for tests and for rendering a song to a file. It takes any `OplChip` implementation:
+
+```ts
+import {
+  NukedOpl3Chip,
+  RegisterSequencer,
+  parseImf,
+  instantiateNukedOpl3,
+  compileNukedOpl3,
+} from 'cawtooth';
+
+const module = await compileNukedOpl3(wasmBytes);
+const chip = new NukedOpl3Chip(await instantiateNukedOpl3(module), 48000);
+const seq = new RegisterSequencer(chip);
+seq.loadStream(parseImf(imfBytes).stream, { tickRate: 700 });
+seq.play();
+
+const output = new Float32Array(48000 * 2 * 5); // 5 seconds stereo
+seq.generate(output);
 ```
 
 ### What the parser handles
