@@ -19,6 +19,9 @@ export { RegisterSequencer } from './sequencer/register-sequencer.js';
 export { parseImf } from './formats/imf/parser.js';
 export type { ImfSong, ParseImfOptions } from './formats/imf/parser.js';
 
+export { parseDro } from './formats/dro/parser.js';
+export type { DroSong } from './formats/dro/parser.js';
+
 export { OplPlayer } from './audio/opl-player.js';
 export type { ChannelsListener, OplPlayerOptions } from './audio/opl-player.js';
 
