@@ -68,12 +68,12 @@ ex.cawtooth_opl_write(chip, 0x20, 0x01); // op1: mult=1
 ex.cawtooth_opl_write(chip, 0x23, 0x01); // op2: mult=1
 ex.cawtooth_opl_write(chip, 0x40, 0x10); // op1: TL (-16 dB)
 ex.cawtooth_opl_write(chip, 0x43, 0x00); // op2: TL (full)
-ex.cawtooth_opl_write(chip, 0x60, 0xF0); // op1: attack=F, decay=0
-ex.cawtooth_opl_write(chip, 0x63, 0xF0); // op2: attack=F, decay=0
+ex.cawtooth_opl_write(chip, 0x60, 0xf0); // op1: attack=F, decay=0
+ex.cawtooth_opl_write(chip, 0x63, 0xf0); // op2: attack=F, decay=0
 ex.cawtooth_opl_write(chip, 0x80, 0x77); // op1: sustain=7, release=7
 ex.cawtooth_opl_write(chip, 0x83, 0x77); // op2: sustain=7, release=7
-ex.cawtooth_opl_write(chip, 0xA0, 0x41); // fnum low
-ex.cawtooth_opl_write(chip, 0xB0, 0x32); // key-on=1, block=4, fnum high bits
+ex.cawtooth_opl_write(chip, 0xa0, 0x41); // fnum low
+ex.cawtooth_opl_write(chip, 0xb0, 0x32); // key-on=1, block=4, fnum high bits
 
 const NUM_FRAMES = 1024;
 const bufBytes = NUM_FRAMES * 2 * 2; // stereo * int16

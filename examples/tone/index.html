@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>cawtooth — tone example</title>
+    <style>
+      body {
+        font-family:
+          system-ui,
+          -apple-system,
+          sans-serif;
+        padding: 2rem;
+        max-width: 48rem;
+        margin: 0 auto;
+        line-height: 1.5;
+      }
+      h1 {
+        margin-top: 0;
+      }
+      button {
+        font-size: 1rem;
+        padding: 0.5rem 1.25rem;
+        margin-right: 0.5rem;
+        cursor: pointer;
+      }
+      button:disabled {
+        cursor: wait;
+        opacity: 0.6;
+      }
+      .status {
+        margin-top: 1rem;
+        padding: 0.75rem 1rem;
+        background: #f4f4f4;
+        border-radius: 4px;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: 0.9rem;
+      }
+      code {
+        background: #f4f4f4;
+        padding: 0.1em 0.3em;
+        border-radius: 3px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>cawtooth — OPL tone</h1>
+    <p>
+      Boots the OPL3 emulator in an AudioWorklet, programs channel 0 with a basic two-operator
+      patch, and triggers a key-on. This exists to prove the full pipeline end-to-end: main thread →
+      worklet → wasm → speakers.
+    </p>
+    <button id="play">Play</button>
+    <button id="stop">Stop (reset chip)</button>
+    <div class="status" id="status">idle — click Play to initialize</div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
