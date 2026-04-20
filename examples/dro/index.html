@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>cawtooth — DRO player</title>
+    <style>
+      body {
+        font-family:
+          system-ui,
+          -apple-system,
+          sans-serif;
+        padding: 2rem;
+        max-width: 48rem;
+        margin: 0 auto;
+        line-height: 1.5;
+      }
+      h1 {
+        margin-top: 0;
+      }
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        align-items: center;
+        margin-top: 1rem;
+      }
+      button,
+      input[type='file'] {
+        font-size: 1rem;
+        padding: 0.45rem 0.9rem;
+      }
+      button {
+        cursor: pointer;
+      }
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+      label {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+      }
+      .status {
+        margin-top: 1rem;
+        padding: 0.75rem 1rem;
+        background: #f4f4f4;
+        border-radius: 4px;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: 0.9rem;
+      }
+      .metadata {
+        margin-top: 1rem;
+        padding: 0.75rem 1rem;
+        background: #fafafa;
+        border: 1px solid #eaeaea;
+        border-radius: 4px;
+        font-size: 0.9rem;
+      }
+      .metadata dl {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 0.25rem 1rem;
+        margin: 0;
+      }
+      .metadata dt {
+        color: #666;
+      }
+      .metadata dd {
+        margin: 0;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+      }
+      code {
+        background: #f4f4f4;
+        padding: 0.1em 0.3em;
+        border-radius: 3px;
+      }
+      h2 {
+        margin-top: 2rem;
+        font-size: 1.1rem;
+      }
+      .scope-grid {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 6px;
+      }
+      .scope-voice {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .scope-voice canvas {
+        width: 100%;
+        height: 52px;
+        background: #0e1015;
+        border-radius: 3px;
+        display: block;
+      }
+      .scope-voice .voice-label {
+        font-size: 0.7rem;
+        color: #666;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>cawtooth — DRO player</h1>
+    <p>
+      Load a <code>.dro</code> file — a DOSBox Raw OPL capture. Unlike IMF, DRO encodes its own
+      timing in milliseconds, so there's no tick-rate selector: the file sounds right on its own.
+      See <a href="https://moddingwiki.shikadi.net/wiki/DRO_Format">the DRO format notes</a> for
+      background.
+    </p>
+
+    <div class="controls">
+      <input id="file" type="file" accept=".dro,application/octet-stream" />
+      <label>
+        <input id="loop" type="checkbox" checked />
+        Loop
+      </label>
+    </div>
+
+    <div class="controls">
+      <button id="play" disabled>Play</button>
+      <button id="pause" disabled>Pause</button>
+      <button id="stop" disabled>Stop</button>
+    </div>
+
+    <div class="status" id="status">idle — choose a file to begin</div>
+
+    <div class="metadata" id="metadata" hidden>
+      <dl>
+        <dt>Variant</dt>
+        <dd id="meta-variant">—</dd>
+        <dt>Hardware</dt>
+        <dd id="meta-hardware">—</dd>
+        <dt>Events</dt>
+        <dd id="meta-events">—</dd>
+        <dt>Duration</dt>
+        <dd id="meta-duration">—</dd>
+      </dl>
+    </div>
+
+    <h2>Per-voice oscilloscope</h2>
+    <p style="color: #666; font-size: 0.9rem; margin-top: -0.25rem">
+      Each canvas shows the last ~10 ms of one OPL3 voice, tapped pre-mix. OPL2-era captures use
+      only the first 9 voices; OPL3 captures can animate all 18.
+    </p>
+    <div id="scope-grid" class="scope-grid"></div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

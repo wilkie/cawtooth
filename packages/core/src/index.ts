@@ -22,6 +22,9 @@ export type { ImfSong, ParseImfOptions } from './formats/imf/parser.js';
 export { parseDro } from './formats/dro/parser.js';
 export type { DroSong } from './formats/dro/parser.js';
 
+export { decompressHsq, readHsqHeader, isHsq } from './formats/hsq/decompress.js';
+export type { HsqHeader } from './formats/hsq/decompress.js';
+
 export { OplPlayer } from './audio/opl-player.js';
 export type { ChannelsListener, OplPlayerOptions } from './audio/opl-player.js';
 
