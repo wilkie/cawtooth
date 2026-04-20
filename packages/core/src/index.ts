@@ -18,9 +18,13 @@ export { RegisterSequencer } from './sequencer/register-sequencer.js';
 
 export { parseImf } from './formats/imf/parser.js';
 export type { ImfSong, ParseImfOptions } from './formats/imf/parser.js';
+export { encodeImf } from './formats/imf/encoder.js';
+export type { EncodeImfOptions } from './formats/imf/encoder.js';
 
 export { parseDro } from './formats/dro/parser.js';
 export type { DroSong } from './formats/dro/parser.js';
+export { encodeDro } from './formats/dro/encoder.js';
+export type { EncodeDroOptions } from './formats/dro/encoder.js';
 
 export { decompressHsq, readHsqHeader, isHsq } from './formats/herad/hsq.js';
 export type { HsqHeader } from './formats/herad/hsq.js';
@@ -44,6 +48,9 @@ export type {
 
 export { OplPlayer } from './audio/opl-player.js';
 export type { ChannelsListener, OplPlayerOptions } from './audio/opl-player.js';
+
+export { renderToPcm, renderToWav, encodeWav } from './audio/export.js';
+export type { RenderToPcmOptions, EncodeWavOptions } from './audio/export.js';
 
 export { OPL_PROCESSOR_NAME } from './worklet/opl-processor-name.js';
 export type { FromWorkletMessage, ToWorkletMessage } from './worklet/messages.js';

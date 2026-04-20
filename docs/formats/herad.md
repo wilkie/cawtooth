@@ -1,6 +1,6 @@
 # HERAD (Herbulot Adlib)
 
-> **Status: Phases A + B + C complete.** HSQ compression (Phase A), the HERAD binary format's structural layout (Phase B), and the event-level parser + renderer that produces an OPL register stream (Phase C) are all implemented. Phase C matches the AdPlug reference for all standard playback features — program changes, note on/off, pitch bend (fine and coarse), slide, transpose, velocity macros, aftertouch (v1), v2 keymaps, and AGD panning.
+> **Status: Phases A + B + C complete, validated tick-for-tick against AdPlug 2.3.3** on all reference files (WORMINTR.HSQ, WORMINTR.AGD, SAVAGE.HSQ, ALARME.HSQ, DETRITUS.HSQ, GORBI2.SQX + its uncompressed .sdb twin) at a 10,000-tick budget — enough to cover the full playable duration of every sample. The cross-check harness ([`tools/adplug-capture/`](../../tools/adplug-capture/)) is reusable for future changes. Phase C matches AdPlug's reference for all standard playback features — program changes, note on/off, pitch bend (fine and coarse), slide, transpose, velocity macros, aftertouch (v1), v2 keymaps, and AGD panning.
 
 ## What it is
 

@@ -149,7 +149,7 @@ describe('parseHerad (decompressed)', () => {
 
 describe('parseHerad — real files', () => {
   const here = dirname(fileURLToPath(import.meta.url));
-  const dataDir = resolve(here, '../../../../../examples/hsq/data');
+  const dataDir = resolve(here, '../../../../../examples/herad/data');
 
   interface Expectation {
     file: string;

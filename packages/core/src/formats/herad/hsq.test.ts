@@ -155,14 +155,14 @@ describe('HSQ decompression', () => {
 });
 
 /*
- * Integration tests — run against real files dropped into examples/hsq/data/.
+ * Integration tests — run against real files dropped into examples/herad/data/.
  * These files are not checked into the repo (game data from Cryo titles), so
  * the tests skip when the files aren't present. When they ARE present, they
  * exercise the decompressor against content no hand-crafted fixture can.
  */
 describe('HSQ decompression — real files', () => {
   const here = dirname(fileURLToPath(import.meta.url));
-  const dataDir = resolve(here, '../../../../../examples/hsq/data');
+  const dataDir = resolve(here, '../../../../../examples/herad/data');
 
   // Expected sizes are what the file's own 6-byte header declares; we verify
   // the decompressor produces exactly that many bytes.

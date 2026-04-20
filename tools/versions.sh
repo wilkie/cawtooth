@@ -14,3 +14,11 @@ EMSDK_COMMIT="main"
 # Nuked-OPL3 source commit. Pinned for reproducible WASM artifacts.
 # Update intentionally; record the resolved SHA here after setup.
 NUKED_OPL3_COMMIT="cfedb09efc03f1d7b5fc1f04dd449d77d8c49d50"
+
+# AdPlug version used for the HERAD A/B harness
+# (tools/adplug-capture/). Not vendored — provided by the system package
+# (Debian: libadplug-dev). The harness is optional; the main test suite
+# skips gracefully when the compiled binary isn't present. Recorded here so
+# future contributors know which reference version we validated the
+# TypeScript HERAD renderer against.
+ADPLUG_VERSION_EXPECTED="2.3.3"

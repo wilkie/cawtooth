@@ -127,20 +127,30 @@ export function renderHeradToStream(song: HeradSong): TimedRegisterStream {
 
   // Parse each track into an absolute-tick event list. Track indices map 1:1
   // to voice indices; tracks past the voice budget are ignored.
+  //
+  // A note on the first-event delay: AdPlug's processEvents has a workaround
+  // that increments the counter threshold by 1 when the first event of a
+  // track has a non-zero delay:
+  //
+  //     if (first && track[i].ticks) track[i].ticks++;
+  //
+  // This compensates for AdPlug's runtime using `++counter` then
+  // compare-and-fire semantics — without the bump, a first event with delay
+  // D would fire at external tick D-1 (one too early) because the very
+  // first call's counter increment counts as one tick of progress. Our
+  // accumulator model doesn't have that counting quirk: `cumulative +=
+  // delayTicks` naturally gives the right tick for every event, first or
+  // not. Applying AdPlug's +1 on top of our accumulator would push first
+  // events one tick LATE, which is exactly the divergence the A/B harness
+  // surfaced at tick 576 of WORMINTR (track 1's first delay = 576).
   const tracks: TimedTrackEvent[][] = [];
   let maxEventTick = 0;
   for (let v = 0; v < Math.min(song.tracks.length, maxVoices); v++) {
     const parsed = parseHeradTrack(song.tracks[v], { variant: song.variant });
     const trackEvents: TimedTrackEvent[] = [];
     let cumulative = 0;
-    let first = true;
     for (const { delayTicks, event } of parsed) {
-      // First-event workaround: AdPlug adds 1 tick to the first non-zero
-      // delay per track to keep multi-track starts aligned.
-      let effectiveDelay = delayTicks;
-      if (first && delayTicks > 0) effectiveDelay++;
-      first = false;
-      cumulative += effectiveDelay;
+      cumulative += delayTicks;
       trackEvents.push({ tick: cumulative, event });
     }
     if (cumulative > maxEventTick) maxEventTick = cumulative;
@@ -458,42 +468,54 @@ function applyAftertouchMacros(
 }
 
 /**
- * Scale an output register toward louder/quieter by a signed sensitivity.
+ * Compute the scaled output value for modulator/carrier velocity or after-
+ * touch macros, matching AdPlug 2.3.3's `macroModOutput` / `macroCarOutput`.
  *
- * Derived from AdPlug's macroModOutput / macroCarOutput:
+ * The formula is shift-based with a 0x80 complement for the positive-
+ * sensitivity side, rather than the `base*2 ± sens*diff/32` form used by
+ * the GitHub-master version of the reference. Shipping AdPlug (the 2.3.3
+ * series on Debian/most distros) uses this shift form, and that's what our
+ * listeners actually hear when A/B-testing.
  *
- *   output = base * 2;                   // work in a 7-bit range (0..126)
- *   diff = (level - 64) * sens;          // signed
- *   if (sens < 0) output += diff / 32;   // same sign: moves output up
- *   if (sens > 0) output -= diff / 32;   // flipped: louder means LOWER output
- *   clamp(0..126); output /= 2;          // back to the 6-bit register range
+ * Steps:
+ *   - If sens is outside [-4, 4], the macro is a no-op (write suppressed).
+ *   - Compute offset from velocity:
+ *     - sens < 0: offset = level >> (sens + 4)
+ *     - sens > 0: offset = (0x80 - level) >> (4 - sens)
+ *   - Clamp offset to [0, 63].
+ *   - Add base output level.
+ *   - Clamp final to [0, 63].
  *
- * The sign flip for positive sens matters because OPL's output-level register
- * is *inverse* amplitude — higher values are quieter. A positive sensitivity
- * is supposed to make the voice louder as velocity/aftertouch rises, which
- * means reducing the output byte. An earlier version of this renderer got
- * the sign wrong and scaled by a too-large factor, flattening dynamics and
- * pinning voices at max/min volume.
+ * Returns -1 when the macro should be skipped (sens out of range); callers
+ * treat that as "don't emit a write at all".
  */
 function scaledOutputLevel(base: number, sens: number, level: number): number {
-  let out = base * 2;
-  const diff = (level - 64) * sens;
-  if (sens < 0) out += Math.trunc(diff / 32);
-  else if (sens > 0) out -= Math.trunc(diff / 32);
-  if (out < 0) out = 0;
-  if (out > 126) out = 126;
-  return (out >> 1) & 0x3f;
+  if (sens < -4 || sens > 4) return -1;
+  let output: number;
+  if (sens < 0) {
+    output = level >>> (sens + 4);
+  } else {
+    output = (0x80 - level) >>> (4 - sens);
+  }
+  if (output > 63) output = 63;
+  output += base;
+  if (output > 63) output = 63;
+  return output & 0x3f;
 }
 
-/** Same shape as scaledOutputLevel but clamped to the 3-bit feedback range. */
+/** Feedback macro — same shape as scaledOutputLevel, 3-bit range, wider [-6, 6] sens. */
 function scaledFeedback(base: number, sens: number, level: number): number {
-  let out = base * 2;
-  const diff = (level - 64) * sens;
-  if (sens < 0) out += Math.trunc(diff / 32);
-  else if (sens > 0) out -= Math.trunc(diff / 32);
-  if (out < 0) out = 0;
-  if (out > 14) out = 14;
-  return (out >> 1) & 0x07;
+  if (sens < -6 || sens > 6) return -1;
+  let feedback: number;
+  if (sens < 0) {
+    feedback = level >>> (sens + 7);
+  } else {
+    feedback = (0x80 - level) >>> (7 - sens);
+  }
+  if (feedback > 7) feedback = 7;
+  feedback += base;
+  if (feedback > 7) feedback = 7;
+  return feedback & 0x07;
 }
 
 function emitModOutputScaled(
@@ -505,9 +527,10 @@ function emitModOutputScaled(
   level: number,
 ): void {
   const raw = patch.raw;
+  const out = scaledOutputLevel(raw[IDX.MOD_OUT], sens, level);
+  if (out < 0) return;
   const slot = SLOT_OFFSET[voice % HERAD_NUM_VOICES];
   const bank = bankOffset(voice);
-  const out = scaledOutputLevel(raw[IDX.MOD_OUT], sens, level);
   emit(tick, bank | (0x40 + slot), outputByte(out, raw[IDX.MOD_KSL]));
 }
 
@@ -520,9 +543,10 @@ function emitCarOutputScaled(
   level: number,
 ): void {
   const raw = patch.raw;
+  const out = scaledOutputLevel(raw[IDX.CAR_OUT], sens, level);
+  if (out < 0) return;
   const slot = SLOT_OFFSET[voice % HERAD_NUM_VOICES];
   const bank = bankOffset(voice);
-  const out = scaledOutputLevel(raw[IDX.CAR_OUT], sens, level);
   emit(tick, bank | (0x43 + slot), outputByte(out, raw[IDX.CAR_KSL]));
 }
 
@@ -536,9 +560,10 @@ function emitFeedbackScaled(
   isAgd: boolean,
 ): void {
   const raw = patch.raw;
+  const fb = scaledFeedback(raw[IDX.FEEDBACK], sens, level);
+  if (fb < 0) return;
   const bank = bankOffset(voice);
   const ch = voice % HERAD_NUM_VOICES;
-  const fb = scaledFeedback(raw[IDX.FEEDBACK], sens, level);
   emit(tick, bank | (0xc0 + ch), feedbackConnectionByte(raw[IDX.CON], fb, raw[IDX.PAN], isAgd));
 }
 

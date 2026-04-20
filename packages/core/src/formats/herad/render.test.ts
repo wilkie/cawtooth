@@ -79,7 +79,7 @@ describe('parseHeradTrack', () => {
 describe('renderHeradToStream — real files', () => {
   let wasmModule: WebAssembly.Module;
   const here = dirname(fileURLToPath(import.meta.url));
-  const dataDir = resolve(here, '../../../../../examples/hsq/data');
+  const dataDir = resolve(here, '../../../../../examples/herad/data');
 
   beforeAll(async () => {
     const wasmPath = resolve(here, '../../../wasm/nuked-opl3.wasm');
@@ -231,11 +231,12 @@ describe('renderHeradToStream — real files', () => {
     events.push(0, 0xff);
     tracks.push(new Uint8Array(events));
 
-    // Instrument: mode=0 SDB1; mod_out=20 at offset 10; mc_mod_out_vel=10 at
-    // offset 30. Everything else zero.
+    // Instrument: mode=0 SDB1; mod_out=20 at offset 10; mc_mod_out_vel=2 at
+    // offset 30. AdPlug 2.3.3's velocity macro only acts when sens is in
+    // [-4, 4] — larger values cause the write to be suppressed entirely.
     const raw = new Uint8Array(40);
     raw[10] = 20; // mod_out
-    raw[30] = 10; // mc_mod_out_vel (positive sensitivity)
+    raw[30] = 2; // mc_mod_out_vel (positive sensitivity, within the valid range)
 
     const song = {
       variant: 'v1' as const,

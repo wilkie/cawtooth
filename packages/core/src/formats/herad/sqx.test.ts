@@ -45,7 +45,7 @@ describe('SQX header detection', () => {
 
 describe('SQX decompression — real files', () => {
   const here = dirname(fileURLToPath(import.meta.url));
-  const dataDir = resolve(here, '../../../../../examples/hsq/data');
+  const dataDir = resolve(here, '../../../../../examples/herad/data');
 
   it('decompresses GORBI2.SQX into plausible HERAD bytes', async () => {
     const path = resolve(dataDir, 'GORBI2.SQX');
