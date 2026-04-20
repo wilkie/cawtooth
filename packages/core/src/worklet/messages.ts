@@ -2,7 +2,15 @@ import type { OplRegisterWrite } from '../chip/types.js';
 
 export interface InitMessage {
   type: 'init';
-  module: WebAssembly.Module;
+  /**
+   * Raw wasm bytes. Compiled inside the worklet.
+   *
+   * A pre-compiled WebAssembly.Module cannot be structured-cloned from the
+   * main thread into AudioWorkletGlobalScope — they live in different agent
+   * clusters, and WebAssembly.Module is bound to its creating cluster.
+   * ArrayBuffer, by contrast, is transferable across that boundary.
+   */
+  wasmBytes: ArrayBuffer;
 }
 
 export interface WriteMessage {
