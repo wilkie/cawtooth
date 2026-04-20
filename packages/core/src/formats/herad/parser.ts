@@ -32,6 +32,7 @@
  */
 
 import { decompressHsq, isHsq } from './hsq.js';
+import { decompressSqx, isSqx } from './sqx.js';
 import {
   HERAD_INST_SIZE,
   HERAD_INSTMODE,
@@ -45,11 +46,22 @@ import {
 } from './types.js';
 
 /**
- * Parse a HERAD file. Accepts either the original compressed bytes (HSQ) or
- * a decompressed payload.
+ * Parse a HERAD file. Accepts HSQ-compressed bytes, SQX-compressed bytes, or
+ * an already-decompressed payload.
+ *
+ * We check HSQ before SQX because HSQ's 6-byte checksum is unambiguous
+ * (1/256 false-positive rate) while SQX detection is a range check on a few
+ * bytes and could occasionally match non-SQX content.
  */
 export function parseHerad(bytes: Uint8Array, options: ParseHeradOptions = {}): HeradSong {
-  const payload = isHsq(bytes) ? decompressHsq(bytes) : bytes;
+  let payload: Uint8Array;
+  if (isHsq(bytes)) {
+    payload = decompressHsq(bytes);
+  } else if (isSqx(bytes)) {
+    payload = decompressSqx(bytes);
+  } else {
+    payload = bytes;
+  }
   return parseDecompressedHerad(payload, options);
 }
 
@@ -116,14 +128,18 @@ export function parseDecompressedHerad(
     tracks.push(bytes.slice(start, end));
   }
 
-  // Instrument bank: 40-byte blocks from instOffset to EOF.
+  // Instrument bank: 40-byte blocks from instOffset to EOF. AdPlug counts
+  // via integer division, silently dropping any trailing bytes past the last
+  // full block — some files (notably some .sdb captures) pad out to a sector
+  // boundary or contain a few non-instrument trailing bytes. Matching that
+  // behaviour avoids rejecting files the reference would happily play.
   const bankSize = bytes.length - instOffset;
-  if (bankSize <= 0 || bankSize % HERAD_INST_SIZE !== 0) {
+  if (bankSize < HERAD_INST_SIZE) {
     throw new Error(
-      `cawtooth/herad: instrument bank size ${bankSize} is not a multiple of ${HERAD_INST_SIZE}`,
+      `cawtooth/herad: instrument bank size ${bankSize} is too small for even one instrument`,
     );
   }
-  const nInsts = bankSize / HERAD_INST_SIZE;
+  const nInsts = Math.floor(bankSize / HERAD_INST_SIZE);
   const instruments: HeradInstrument[] = [];
   for (let i = 0; i < nInsts; i++) {
     instruments.push(decodeInstrument(bytes, instOffset + i * HERAD_INST_SIZE));

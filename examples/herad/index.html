@@ -124,14 +124,14 @@
     </p>
 
     <div class="caveat">
-      <strong>Phase C1 preview.</strong> Notes, programs, pitch bend (fine-tune), and velocity
-      scaling work. Slide macros, aftertouch, transpose, keymaps, and AGD panning are deferred to
-      Phase C2, so some songs won't sound exactly like AdPlug yet. HERAD v2 files (like Alarme) may
-      need forced variant — use the selector below.
+      All standard HERAD playback features are supported: program changes, note on/off, pitch bend
+      (fine + coarse), slide, transpose, velocity macros, aftertouch (v1), AGD panning, and v2
+      keymap indirection. HERAD v2 files that don't use keymaps (like ALARME) auto-detect as v1 —
+      select <code>v2</code> from the variant menu if a file sounds wrong.
     </div>
 
     <div class="controls">
-      <input id="file" type="file" accept=".hsq,.agd,.ha2,application/octet-stream" />
+      <input id="file" type="file" accept=".hsq,.agd,.ha2,.sqx,.sdb,application/octet-stream" />
       <label>
         Variant:
         <select id="variant">

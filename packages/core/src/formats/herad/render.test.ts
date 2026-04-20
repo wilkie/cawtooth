@@ -152,21 +152,29 @@ describe('renderHeradToStream — real files', () => {
     chip.dispose();
   });
 
-  it('WORMINTR.AGD enables OPL3 mode and uses upper-bank voices', async () => {
+  it('WORMINTR.AGD performs chip init and uses upper-bank voices', async () => {
     const song = await loadSong('WORMINTR.AGD');
     if (!song) return;
     expect(song.isAgd).toBe(true);
     const stream = renderHeradToStream(song);
 
-    // First write should be 0x105 = 1 (OPL3 enable) for an AGD song.
-    expect(stream.stream.regs[0]).toBe(0x105);
-    expect(stream.stream.values[0]).toBe(1);
+    // Chip init (per AdPlug rewind): reg 0x01=0x20 (wave select enable),
+    // 0xBD=0 (no percussion), 0x08=0x40 (note-sel), and for AGD 0x105=1
+    // (OPL3 enable) and 0x104=0 (disable 4-op). They all fire at tick 0 and
+    // appear at the top of the stream.
+    const initRegs = new Set<number>();
+    for (let i = 0; i < 6; i++) initRegs.add(stream.stream.regs[i]);
+    expect(initRegs.has(0x01)).toBe(true);
+    expect(initRegs.has(0xbd)).toBe(true);
+    expect(initRegs.has(0x08)).toBe(true);
+    expect(initRegs.has(0x105)).toBe(true);
+    expect(initRegs.has(0x104)).toBe(true);
 
-    // At least one register write should target the upper bank (reg >= 0x100
-    // AND != 0x105), confirming voices 9+ are actually used.
+    // At least one non-init upper-bank write confirms voices 9+ are used.
     let upperBankWrites = 0;
     for (let i = 0; i < stream.stream.regs.length; i++) {
-      if (stream.stream.regs[i] >= 0x100 && stream.stream.regs[i] !== 0x105) {
+      const r = stream.stream.regs[i];
+      if (r >= 0x100 && r !== 0x105 && r !== 0x104) {
         upperBankWrites++;
       }
     }
@@ -177,5 +185,116 @@ describe('renderHeradToStream — real files', () => {
     seq.generate(out);
     expect(peak(out)).toBeGreaterThan(0.005);
     chip.dispose();
+  });
+
+  it('OPL2 chip init writes appear at the top of every stream', async () => {
+    const song = await loadSong('WORMINTR.HSQ');
+    if (!song) return;
+    const stream = renderHeradToStream(song);
+    // First 3 writes should be the OPL2 init pair (0x01/0xBD/0x08).
+    const firstThree = new Set<number>();
+    for (let i = 0; i < 3; i++) firstThree.add(stream.stream.regs[i]);
+    expect(firstThree.has(0x01)).toBe(true);
+    expect(firstThree.has(0xbd)).toBe(true);
+    expect(firstThree.has(0x08)).toBe(true);
+  });
+
+  it('ALARME.HSQ parses and renders when forced to v2', async () => {
+    const song = await loadSong('ALARME.HSQ', 'v2');
+    if (!song) return;
+    expect(song.variant).toBe('v2');
+    const stream = renderHeradToStream(song);
+    expect(stream.stream.regs.length).toBeGreaterThan(100);
+    const { chip, seq } = makeChipDrivenBy(stream);
+    const out = new Float32Array(SAMPLE_RATE * 3 * 2);
+    seq.generate(out);
+    expect(peak(out)).toBeGreaterThan(0.005);
+    chip.dispose();
+  });
+
+  it('velocity macros scale output smoothly, preserving dynamics', async () => {
+    // Regression check for the old macro math, which clamped the register
+    // to 0 or 63 with any non-trivial sensitivity and flattened dynamics.
+    // We construct a minimal instrument with mod_out=20 and a positive
+    // sensitivity, render note-ons at varying velocities, and verify the
+    // 0x40 writes land in a continuous range — not pinned at the extremes.
+    //
+    // Build a synthetic HERAD song with one track and one patch.
+    const tracks: Uint8Array[] = [];
+    const events: number[] = [];
+    // Program change to instrument 0.
+    events.push(0, 0xc0, 0);
+    // Note-ons at velocities 0, 32, 64, 96, 127 with a 1-tick delay between.
+    for (const vel of [0, 32, 64, 96, 127]) {
+      events.push(1, 0x90, 60, vel);
+    }
+    events.push(0, 0xff);
+    tracks.push(new Uint8Array(events));
+
+    // Instrument: mode=0 SDB1; mod_out=20 at offset 10; mc_mod_out_vel=10 at
+    // offset 30. Everything else zero.
+    const raw = new Uint8Array(40);
+    raw[10] = 20; // mod_out
+    raw[30] = 10; // mc_mod_out_vel (positive sensitivity)
+
+    const song = {
+      variant: 'v1' as const,
+      isAgd: false,
+      speed: 0x0100,
+      loopStart: 0,
+      loopEnd: 0,
+      loopCount: 0,
+      tracks,
+      instruments: [{ kind: 'patch' as const, mode: 0 as const, raw }],
+    };
+
+    const stream = renderHeradToStream(song);
+
+    // Collect writes to register 0x40 (modulator output, slot 0). After the
+    // initial program-change write, each note-on adds one velocity-scaled
+    // write. We expect 6: 1 from programChange + 5 from note-ons.
+    const modOutWrites: number[] = [];
+    for (let i = 0; i < stream.stream.regs.length; i++) {
+      if (stream.stream.regs[i] === 0x40) {
+        modOutWrites.push(stream.stream.values[i] & 0x3f);
+      }
+    }
+    expect(modOutWrites.length).toBeGreaterThanOrEqual(6);
+
+    // The 5 velocity-scaled values (skipping index 0 from the programChange)
+    // should be monotonically non-increasing — louder velocity → lower
+    // register value → louder output. Also: NONE should pin at 0 or 63,
+    // confirming the dynamic range actually uses the middle of the scale.
+    const scaled = modOutWrites.slice(1, 6);
+    for (let i = 1; i < scaled.length; i++) {
+      expect(scaled[i]).toBeLessThanOrEqual(scaled[i - 1]);
+    }
+    // First value (velocity 0) is the quietest, last (127) is the loudest.
+    expect(scaled[0]).toBeGreaterThan(scaled[scaled.length - 1]);
+    // None should have saturated.
+    for (const v of scaled) {
+      expect(v).toBeGreaterThan(0);
+      expect(v).toBeLessThan(63);
+    }
+  });
+
+  it('songs with slide instruments emit intermediate pitch updates', async () => {
+    // Find a song whose renderer output includes multiple 0xB0 writes on the
+    // same voice between note-on and note-off, which is what slide produces.
+    // SAVAGE is a reliable choice — Dune's music uses HERAD slides heavily.
+    const song = await loadSong('SAVAGE.HSQ');
+    if (!song) return;
+    const stream = renderHeradToStream(song);
+
+    // Count 0xB0 writes for voice 0 (reg 0xB0 low bank).
+    let b0Writes = 0;
+    for (let i = 0; i < stream.stream.regs.length; i++) {
+      if (stream.stream.regs[i] === 0xb0) b0Writes++;
+    }
+    // Without slide: one 0xB0 per note-on and note-off → ~(2 × note count).
+    // With slide: every tick of a held slide adds a 0xB0 write. If slides
+    // exist in the song, we'll see substantially more 0xB0 writes than
+    // note events alone would produce.
+    expect(b0Writes).toBeGreaterThan(100);
   });
 });

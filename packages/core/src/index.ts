@@ -25,6 +25,9 @@ export type { DroSong } from './formats/dro/parser.js';
 export { decompressHsq, readHsqHeader, isHsq } from './formats/herad/hsq.js';
 export type { HsqHeader } from './formats/herad/hsq.js';
 
+export { decompressSqx, readSqxHeader, isSqx } from './formats/herad/sqx.js';
+export type { SqxHeader } from './formats/herad/sqx.js';
+
 export { parseHerad, parseDecompressedHerad } from './formats/herad/parser.js';
 export { renderHeradToStream } from './formats/herad/render.js';
 export { parseHeradTrack } from './formats/herad/events.js';

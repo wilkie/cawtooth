@@ -95,13 +95,22 @@ describe('parseHerad (decompressed)', () => {
     expect(() => parseDecompressedHerad(bytes)).toThrow(/wSpeed/);
   });
 
-  it('rejects a file whose instrument bank size is not a multiple of 40', () => {
-    // Append a single byte past the end of the instrument bank — bank size
-    // becomes 41, which is above the minimum but not a multiple of 40.
+  it('silently drops trailing bytes past the last full instrument block', () => {
+    // AdPlug matches this behaviour — real .sdb files occasionally have
+    // padding. A single trailing byte should leave the instrument count
+    // unchanged, not throw.
     const bytes = buildMinimal({});
-    const corrupted = new Uint8Array(bytes.length + 1);
-    corrupted.set(bytes, 0);
-    expect(() => parseDecompressedHerad(corrupted)).toThrow(/instrument bank size/);
+    const padded = new Uint8Array(bytes.length + 1);
+    padded.set(bytes, 0);
+    const song = parseDecompressedHerad(padded);
+    expect(song.instruments).toHaveLength(1);
+  });
+
+  it('rejects a file whose bank is shorter than one instrument', () => {
+    // Truncate so the bank isn't even 40 bytes — no instruments at all.
+    const bytes = buildMinimal({});
+    const truncated = bytes.subarray(0, bytes.length - 3);
+    expect(() => parseDecompressedHerad(truncated)).toThrow(/too small/);
   });
 
   it('allows the caller to force a variant', () => {
