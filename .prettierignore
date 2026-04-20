@@ -1,0 +1,12 @@
+dist/
+**/dist/
+node_modules/
+**/node_modules/
+coverage/
+**/coverage/
+package-lock.json
+pnpm-lock.yaml
+tools/emsdk/
+tools/nuked-opl3/
+packages/core/native/
+packages/core/wasm/

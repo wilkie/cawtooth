@@ -1,0 +1,13 @@
+{
+  "name": "@cawtooth/player",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Web-based player UI for the cawtooth library (placeholder — not yet implemented)",
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "build": "echo 'player not yet implemented' && exit 0",
+    "test": "echo 'no tests yet' && exit 0",
+    "typecheck": "echo 'no typecheck yet' && exit 0"
+  }
+}
