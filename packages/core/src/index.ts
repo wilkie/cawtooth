@@ -26,6 +26,9 @@ export { decompressHsq, readHsqHeader, isHsq } from './formats/herad/hsq.js';
 export type { HsqHeader } from './formats/herad/hsq.js';
 
 export { parseHerad, parseDecompressedHerad } from './formats/herad/parser.js';
+export { renderHeradToStream } from './formats/herad/render.js';
+export { parseHeradTrack } from './formats/herad/events.js';
+export type { HeradEvent, HeradTimedEvent } from './formats/herad/events.js';
 export { HERAD_INST_SIZE, HERAD_INSTMODE, HERAD_MAX_TRACKS } from './formats/herad/types.js';
 export type {
   HeradInstrument,
