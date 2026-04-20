@@ -2,7 +2,7 @@ import { readFile, access } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
-import { decompressHsq, isHsq, readHsqHeader } from './decompress.js';
+import { decompressHsq, isHsq, readHsqHeader } from './hsq.js';
 
 /**
  * Build a minimal valid HSQ file from a literal payload. Every byte in

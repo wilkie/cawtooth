@@ -22,8 +22,19 @@ export type { ImfSong, ParseImfOptions } from './formats/imf/parser.js';
 export { parseDro } from './formats/dro/parser.js';
 export type { DroSong } from './formats/dro/parser.js';
 
-export { decompressHsq, readHsqHeader, isHsq } from './formats/hsq/decompress.js';
-export type { HsqHeader } from './formats/hsq/decompress.js';
+export { decompressHsq, readHsqHeader, isHsq } from './formats/herad/hsq.js';
+export type { HsqHeader } from './formats/herad/hsq.js';
+
+export { parseHerad, parseDecompressedHerad } from './formats/herad/parser.js';
+export { HERAD_INST_SIZE, HERAD_INSTMODE, HERAD_MAX_TRACKS } from './formats/herad/types.js';
+export type {
+  HeradInstrument,
+  HeradKeymap,
+  HeradPatch,
+  HeradSong,
+  HeradVariant,
+  ParseHeradOptions,
+} from './formats/herad/types.js';
 
 export { OplPlayer } from './audio/opl-player.js';
 export type { ChannelsListener, OplPlayerOptions } from './audio/opl-player.js';
