@@ -3,26 +3,16 @@ import { createNukedOpl3Imports } from '../chip/loader.js';
 import type { ToWorkletMessage, FromWorkletMessage } from './messages.js';
 import { OPL_PROCESSOR_NAME } from './opl-processor-name.js';
 
-console.log('[cawtooth worklet] module loaded at top level');
-
 class CawtoothOplProcessor extends AudioWorkletProcessor {
   private chip: NukedOpl3Chip | null = null;
   private interleaved: Float32Array | null = null;
 
   constructor() {
     super();
-    console.log('[cawtooth worklet] processor constructed, sampleRate=', sampleRate);
-    this.port.onmessage = (ev: MessageEvent<ToWorkletMessage>) => {
-      console.log('[cawtooth worklet] message received:', ev.data?.type);
-      this.handle(ev.data);
-    };
-    this.port.onmessageerror = (ev) => {
-      console.error('[cawtooth worklet] messageerror:', ev);
-    };
+    this.port.onmessage = (ev: MessageEvent<ToWorkletMessage>) => this.handle(ev.data);
   }
 
   private post(msg: FromWorkletMessage): void {
-    console.log('[cawtooth worklet] posting back:', msg.type);
     this.port.postMessage(msg);
   }
 
@@ -30,16 +20,11 @@ class CawtoothOplProcessor extends AudioWorkletProcessor {
     switch (msg.type) {
       case 'init': {
         try {
-          console.log('[cawtooth worklet] compiling wasm, bytes=', msg.wasmBytes.byteLength);
           const module = new WebAssembly.Module(msg.wasmBytes);
-          console.log('[cawtooth worklet] instantiating wasm');
           const instance = new WebAssembly.Instance(module, createNukedOpl3Imports());
-          console.log('[cawtooth worklet] creating chip');
           this.chip = new NukedOpl3Chip(instance, sampleRate);
-          console.log('[cawtooth worklet] chip ready');
           this.post({ type: 'ready' });
         } catch (err) {
-          console.error('[cawtooth worklet] init failed:', err);
           this.post({
             type: 'error',
             message: err instanceof Error ? err.message : String(err),
@@ -92,9 +77,4 @@ class CawtoothOplProcessor extends AudioWorkletProcessor {
   }
 }
 
-try {
-  registerProcessor(OPL_PROCESSOR_NAME, CawtoothOplProcessor);
-  console.log('[cawtooth worklet] registerProcessor OK:', OPL_PROCESSOR_NAME);
-} catch (err) {
-  console.error('[cawtooth worklet] registerProcessor failed:', err);
-}
+registerProcessor(OPL_PROCESSOR_NAME, CawtoothOplProcessor);

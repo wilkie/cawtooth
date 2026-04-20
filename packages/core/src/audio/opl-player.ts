@@ -29,45 +29,36 @@ export class OplPlayer {
     const ownsContext = !options.audioContext;
     const ctx = options.audioContext ?? new AudioContext();
 
-    console.log('[cawtooth] loading worklet module:', options.workletUrl.toString());
     await ctx.audioWorklet.addModule(options.workletUrl.toString());
-    console.log('[cawtooth] worklet module loaded');
 
     // Worklets can't fetch(). Main thread fetches the raw bytes and hands
     // them to the worklet via a transferable ArrayBuffer — a pre-compiled
     // WebAssembly.Module can't cross the agent-cluster boundary into
     // AudioWorkletGlobalScope, so we compile on the worklet side.
-    console.log('[cawtooth] fetching wasm:', options.wasmUrl.toString());
     const wasmResp = await fetch(options.wasmUrl.toString());
     if (!wasmResp.ok) {
       throw new Error(`cawtooth: failed to fetch wasm: ${wasmResp.status} ${wasmResp.statusText}`);
     }
     const wasmBytes = await wasmResp.arrayBuffer();
-    console.log('[cawtooth] wasm fetched, bytes=', wasmBytes.byteLength);
 
     const node = new AudioWorkletNode(ctx, OPL_PROCESSOR_NAME, {
       numberOfInputs: 0,
       numberOfOutputs: 1,
       outputChannelCount: [2],
     });
-    console.log('[cawtooth] AudioWorkletNode created');
 
     const ready = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         reject(
           new Error(
             'cawtooth: worklet did not respond within 10s. ' +
-              'The worklet processor may not have loaded, or the init message did not arrive. ' +
-              'Check the browser console for worklet-side errors.',
+              'The worklet processor may not have loaded, or the init message did not arrive.',
           ),
         );
       }, 10_000);
 
-      // Using onmessage (not addEventListener) so the port is implicitly
-      // started without a separate .start() call.
       node.port.onmessage = (ev: MessageEvent<FromWorkletMessage>) => {
         const msg = ev.data;
-        console.log('[cawtooth] message from worklet:', msg);
         if (msg.type === 'ready') {
           clearTimeout(timer);
           resolve();
@@ -84,10 +75,8 @@ export class OplPlayer {
     });
 
     const initMsg: ToWorkletMessage = { type: 'init', wasmBytes };
-    console.log('[cawtooth] posting init to worklet (transferring wasm bytes)');
     node.port.postMessage(initMsg, [wasmBytes]);
     await ready;
-    console.log('[cawtooth] worklet ready');
 
     return new OplPlayer(ctx, ownsContext, node);
   }

@@ -8,6 +8,16 @@ export {
 export type { NukedOpl3Exports } from './chip/loader.js';
 export { NukedOpl3Chip } from './chip/nuked-opl3.js';
 
+export type {
+  RegisterEventStream,
+  RegisterStreamTiming,
+  TimedRegisterStream,
+} from './sequencer/types.js';
+export { RegisterSequencer } from './sequencer/register-sequencer.js';
+
+export { parseImf } from './formats/imf/parser.js';
+export type { ImfSong, ParseImfOptions } from './formats/imf/parser.js';
+
 export { OplPlayer } from './audio/opl-player.js';
 export type { OplPlayerOptions } from './audio/opl-player.js';
 
