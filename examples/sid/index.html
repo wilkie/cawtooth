@@ -123,6 +123,18 @@
         <select id="subsong" disabled></select>
       </label>
     </div>
+    <div class="row">
+      <button id="download" disabled>Download WAV</button>
+      <label>
+        Length:
+        <select id="download-length">
+          <option value="30">30 s</option>
+          <option value="60" selected>1 min</option>
+          <option value="120">2 min</option>
+          <option value="300">5 min</option>
+        </select>
+      </label>
+    </div>
     <dl class="meta" id="meta" hidden>
       <dt>Title</dt><dd id="meta-title"></dd>
       <dt>Author</dt><dd id="meta-author"></dd>

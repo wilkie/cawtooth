@@ -12,6 +12,7 @@
  */
 
 import type { OplChip } from '../chip/types.js';
+import type { SidTune } from '../formats/psid/runtime.js';
 import { RegisterSequencer } from '../sequencer/register-sequencer.js';
 import type { TimedRegisterStream } from '../sequencer/types.js';
 
@@ -74,7 +75,7 @@ export function encodeWav(
   samples: Float32Array,
   sampleRate: number,
   options: EncodeWavOptions = {},
-): Uint8Array {
+): Uint8Array<ArrayBuffer> {
   const format = options.format ?? 'pcm16';
   const numChannels = 2;
   const numFrames = samples.length / numChannels;
@@ -132,9 +133,76 @@ export function encodeWav(
 export function renderToWav(
   timed: TimedRegisterStream,
   options: RenderToPcmOptions & EncodeWavOptions,
-): Uint8Array {
+): Uint8Array<ArrayBuffer> {
   const pcm = renderToPcm(timed, options);
   return encodeWav(pcm, options.chip.sampleRate, options);
+}
+
+export interface RenderSidTuneOptions {
+  /**
+   * Tune to render. Its `sampleRate` determines the output rate; its
+   * `song.startSong` is the default subsong if `subsong` is omitted.
+   */
+  readonly tune: SidTune;
+  /** 1-based subsong index. Defaults to the tune's PSID startSong field. */
+  readonly subsong?: number;
+  /**
+   * Output length in seconds. Required: PSID tunes have no notion of a
+   * natural end (they loop forever on real hardware), so the caller
+   * chooses how much to capture.
+   */
+  readonly durationSec: number;
+  /**
+   * Length of a linear fade-out applied to the tail, in seconds. Keeps
+   * truncation from sounding like a hard cut. Default 2 seconds. Set to
+   * 0 to disable. Clamped to `durationSec` (short clips fade entirely).
+   */
+  readonly fadeOutSec?: number;
+}
+
+/**
+ * Render a PSID tune offline into stereo-interleaved Float32 PCM.
+ *
+ * The tune's init routine runs first (so the caller doesn't need to
+ * `initSong()` themselves), then `generate()` fills the buffer in one
+ * shot. A linear fade-out on the tail is applied by default so truncated
+ * renders don't click.
+ */
+export function renderSidTuneToPcm(options: RenderSidTuneOptions): Float32Array {
+  const { tune, durationSec, fadeOutSec = 2 } = options;
+  const subsong = options.subsong ?? tune.song.startSong;
+
+  tune.initSong(subsong);
+
+  const numFrames = Math.max(1, Math.round(durationSec * tune.sampleRate));
+  const pcm = new Float32Array(numFrames * 2);
+  tune.generate(pcm);
+
+  if (fadeOutSec > 0) {
+    const fadeFrames = Math.min(numFrames, Math.round(fadeOutSec * tune.sampleRate));
+    const fadeStart = numFrames - fadeFrames;
+    for (let f = fadeStart; f < numFrames; f++) {
+      // Linear ramp from 1.0 at fadeStart down to 0.0 at the final frame.
+      // Simple and audibly smooth; matches what the OPL export would do
+      // if it grew a tail-fade option.
+      const gain = 1 - (f - fadeStart) / Math.max(1, fadeFrames - 1);
+      pcm[f * 2] *= gain;
+      pcm[f * 2 + 1] *= gain;
+    }
+  }
+
+  return pcm;
+}
+
+/**
+ * Convenience: render a PSID tune offline and return the audio as a
+ * ready-to-save WAV file.
+ */
+export function renderSidTuneToWav(
+  options: RenderSidTuneOptions & EncodeWavOptions,
+): Uint8Array<ArrayBuffer> {
+  const pcm = renderSidTuneToPcm(options);
+  return encodeWav(pcm, options.tune.sampleRate, options);
 }
 
 function writeAscii(bytes: Uint8Array, offset: number, text: string): void {

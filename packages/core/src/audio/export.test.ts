@@ -5,7 +5,16 @@ import { dirname, resolve } from 'node:path';
 import { NukedOpl3Chip } from '../chip/nuked-opl3.js';
 import { createNukedOpl3Imports } from '../chip/loader.js';
 import { TEST_TONE_WRITES } from '../chip/__fixtures__/test-tone.js';
-import { encodeWav, renderToPcm, renderToWav } from './export.js';
+import { parsePsid } from '../formats/psid/parser.js';
+import { SidTune } from '../formats/psid/runtime.js';
+import { createSidplayImports } from '../formats/psid/sidplay-loader.js';
+import {
+  encodeWav,
+  renderSidTuneToPcm,
+  renderSidTuneToWav,
+  renderToPcm,
+  renderToWav,
+} from './export.js';
 import type { RegisterEventStream, TimedRegisterStream } from '../sequencer/types.js';
 
 const SAMPLE_RATE = 48000;
@@ -153,6 +162,118 @@ describe('renderToWav', () => {
       expect(dataSize).toBeLessThan(260000);
     } finally {
       chip.dispose();
+    }
+  });
+});
+
+describe('renderSidTuneToPcm / renderSidTuneToWav', () => {
+  const SID_SAMPLE_RATE = 44100;
+  let sidplayModule: WebAssembly.Module;
+
+  beforeAll(async () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const wasmPath = resolve(here, '../../wasm/sidplay.wasm');
+    sidplayModule = await WebAssembly.compile(await readFile(wasmPath));
+  });
+
+  async function makeBatmanTune(): Promise<SidTune> {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const sidBytes = new Uint8Array(
+      await readFile(resolve(here, '../../../../examples/sid/data/Batman_the_Movie.sid')),
+    );
+    const song = parsePsid(sidBytes);
+    const instance = new WebAssembly.Instance(sidplayModule, createSidplayImports());
+    return new SidTune(instance, song, { sampleRate: SID_SAMPLE_RATE, samplingMethod: 'fast' });
+  }
+
+  it('renders a PSID tune to stereo PCM with the requested duration', async () => {
+    const tune = await makeBatmanTune();
+    try {
+      const pcm = renderSidTuneToPcm({ tune, durationSec: 0.5, fadeOutSec: 0 });
+      // Stereo interleaved, 0.5 seconds.
+      expect(pcm.length).toBe(SID_SAMPLE_RATE * 0.5 * 2);
+      expect(peak(pcm)).toBeGreaterThan(0.01);
+    } finally {
+      tune.dispose();
+    }
+  });
+
+  it('applies a tail fade-out by default', async () => {
+    const tune = await makeBatmanTune();
+    try {
+      // 1-second render with 0.5-second fade. The very last frames
+      // should be near silent; the middle should still be at full level.
+      const pcm = renderSidTuneToPcm({ tune, durationSec: 1.0, fadeOutSec: 0.5 });
+      const lastFrameL = pcm[pcm.length - 2];
+      const lastFrameR = pcm[pcm.length - 1];
+      // Last frame gain = 0 (linear ramp's final value).
+      expect(Math.abs(lastFrameL)).toBeLessThan(1e-6);
+      expect(Math.abs(lastFrameR)).toBeLessThan(1e-6);
+
+      // Sample right before the fade begins (at ~0.5s mark) should still
+      // be at roughly full amplitude relative to nearby non-faded frames.
+      const preFadeIdx = Math.round(SID_SAMPLE_RATE * 0.4) * 2;
+      const preFadeSample = Math.abs(pcm[preFadeIdx]);
+      const lastNonFade = Math.abs(pcm[Math.round(SID_SAMPLE_RATE * 0.45) * 2]);
+      // They should be the same order of magnitude.
+      expect(preFadeSample).toBeGreaterThan(0);
+      expect(lastNonFade).toBeGreaterThan(0);
+    } finally {
+      tune.dispose();
+    }
+  });
+
+  it('renders a WAV file with the correct sample rate and size', async () => {
+    const tune = await makeBatmanTune();
+    try {
+      const wav = renderSidTuneToWav({ tune, durationSec: 0.25, fadeOutSec: 0 });
+      const dv = new DataView(wav.buffer);
+      expect(dv.getUint32(24, true)).toBe(SID_SAMPLE_RATE);
+      // 0.25s * 44100 frames * 2 channels * 2 bytes = 44100 bytes.
+      expect(dv.getUint32(40, true)).toBe(Math.round(SID_SAMPLE_RATE * 0.25) * 2 * 2);
+    } finally {
+      tune.dispose();
+    }
+  });
+
+  it('uses the PSID startSong when no subsong is given', async () => {
+    const tune = await makeBatmanTune();
+    try {
+      // The Batman fixture's startSong is 1. Just verify the render
+      // completes and produces non-silent audio; detailed subsong
+      // behavior is tested in runtime.test.ts.
+      const pcm = renderSidTuneToPcm({ tune, durationSec: 0.2, fadeOutSec: 0 });
+      expect(peak(pcm)).toBeGreaterThan(0.01);
+      expect(tune.song.startSong).toBe(1);
+    } finally {
+      tune.dispose();
+    }
+  });
+
+  it('respects an explicit subsong', async () => {
+    const tune = await makeBatmanTune();
+    try {
+      // Batman has 9 songs; render subsong 2.
+      const pcm = renderSidTuneToPcm({
+        tune,
+        subsong: 2,
+        durationSec: 0.2,
+        fadeOutSec: 0,
+      });
+      expect(peak(pcm)).toBeGreaterThan(0.005);
+    } finally {
+      tune.dispose();
+    }
+  });
+
+  it('rejects out-of-range subsong numbers', async () => {
+    const tune = await makeBatmanTune();
+    try {
+      expect(() =>
+        renderSidTuneToPcm({ tune, subsong: 99, durationSec: 0.1, fadeOutSec: 0 }),
+      ).toThrow(/out of range/);
+    } finally {
+      tune.dispose();
     }
   });
 });

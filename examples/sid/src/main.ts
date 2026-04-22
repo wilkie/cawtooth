@@ -1,4 +1,11 @@
-import { PsidPlayer, type PsidPlaybackInfo } from 'cawtooth';
+import {
+  PsidPlayer,
+  SidTune,
+  createSidplayImports,
+  parsePsid,
+  renderSidTuneToWav,
+  type PsidPlaybackInfo,
+} from 'cawtooth';
 import workletUrl from 'cawtooth/worklet/psid?url';
 import wasmUrl from 'cawtooth/wasm/sidplay.wasm?url';
 import batmanUrl from '../data/Batman_the_Movie.sid?url';
@@ -18,6 +25,8 @@ const metaChip = document.getElementById('meta-chip') as HTMLElement;
 const metaClock = document.getElementById('meta-clock') as HTMLElement;
 const metaPlayRate = document.getElementById('meta-play-rate') as HTMLElement;
 const scopeContainer = document.getElementById('scope') as HTMLElement;
+const downloadBtn = document.getElementById('download') as HTMLButtonElement;
+const downloadLengthSel = document.getElementById('download-length') as HTMLSelectElement;
 
 const scope: Oscilloscope = createOscilloscope(scopeContainer, {
   voiceCount: 3,
@@ -27,6 +36,13 @@ const scope: Oscilloscope = createOscilloscope(scopeContainer, {
 let player: PsidPlayer | null = null;
 let unsubscribeScope: (() => void) | null = null;
 let pendingSidBytes: ArrayBuffer | null = null;
+// The bytes of the currently-loaded tune, kept so the download handler
+// can re-parse + re-render offline. PsidPlayer.create doesn't transfer
+// sidBytes, so this reference stays live.
+let currentSidBytes: ArrayBuffer | null = null;
+// Cached wasm module for offline render. Re-fetched once on first
+// download click; browser cache makes subsequent calls effectively free.
+let cachedWasmModule: WebAssembly.Module | null = null;
 
 function setStatus(s: string): void {
   statusEl.textContent = s;
@@ -96,6 +112,8 @@ playBtn.addEventListener('click', async () => {
       pendingSidBytes ??
       (sourceSel.value === 'picker' ? await loadPicked() : await loadBatman());
 
+    currentSidBytes = sidBytes;
+
     player = await PsidPlayer.create({
       workletUrl,
       wasmUrl,
@@ -110,6 +128,7 @@ playBtn.addEventListener('click', async () => {
     scope.start();
 
     renderMeta(player.info);
+    downloadBtn.disabled = false;
     setStatus(
       `playing — "${player.info.name}" subsong ${player.info.subsong}/${player.info.songs} on ${player.info.model}`,
     );
@@ -131,4 +150,77 @@ subsongSel.addEventListener('change', () => {
   const sub = Number(subsongSel.value);
   player.selectSong(sub);
   setStatus(`playing — subsong ${sub}/${player.info.songs}`);
+});
+
+async function ensureWasmModule(): Promise<WebAssembly.Module> {
+  if (cachedWasmModule) return cachedWasmModule;
+  const resp = await fetch(wasmUrl);
+  if (!resp.ok) throw new Error(`failed to fetch wasm: ${resp.status}`);
+  cachedWasmModule = await WebAssembly.compile(await resp.arrayBuffer());
+  return cachedWasmModule;
+}
+
+function sanitizeFilename(name: string): string {
+  // Keep alnum, dash, underscore, dot, space. Collapse anything else to
+  // underscore. Trim leading/trailing whitespace.
+  const cleaned = name.replace(/[^\w\-. ]+/g, '_').trim();
+  return cleaned || 'sid-tune';
+}
+
+downloadBtn.addEventListener('click', async () => {
+  if (!currentSidBytes || !player) {
+    setStatus('nothing loaded — press Play first');
+    return;
+  }
+  const info = player.info;
+  const durationSec = Number(downloadLengthSel.value);
+
+  downloadBtn.disabled = true;
+  setStatus(`rendering ${durationSec}s of "${info.name}" (subsong ${info.subsong})…`);
+
+  try {
+    const t0 = performance.now();
+
+    // Offline render runs on the main thread with its own wasm instance,
+    // independent of the worklet that's doing live playback. The tune
+    // bytes are still live on the main thread (PsidPlayer.create doesn't
+    // transfer them) so we can just reparse + rerun init here.
+    const song = parsePsid(new Uint8Array(currentSidBytes));
+    const wasmModule = await ensureWasmModule();
+    const instance = new WebAssembly.Instance(wasmModule, createSidplayImports());
+    const tune = new SidTune(instance, song, {
+      sampleRate: 44100,
+      model: info.model,
+      clockFrequency: info.clockFrequency,
+    });
+    const wav = renderSidTuneToWav({
+      tune,
+      subsong: info.subsong,
+      durationSec,
+      fadeOutSec: Math.min(3, durationSec / 4),
+    });
+    tune.dispose();
+
+    // Build a filename: "{title}-subsong{n}.wav"
+    const base = sanitizeFilename(info.name);
+    const suffix = info.songs > 1 ? `-subsong${info.subsong}` : '';
+    const filename = `${base}${suffix}.wav`;
+
+    const blob = new Blob([wav], { type: 'audio/wav' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+
+    const elapsedMs = performance.now() - t0;
+    setStatus(
+      `rendered ${filename} (${(wav.length / 1024).toFixed(0)} KB) in ${elapsedMs.toFixed(0)}ms`,
+    );
+  } catch (err) {
+    setStatus(`export failed: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    downloadBtn.disabled = false;
+  }
 });

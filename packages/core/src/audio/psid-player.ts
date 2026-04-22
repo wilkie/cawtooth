@@ -155,10 +155,21 @@ export class PsidPlayer {
     return this.node;
   }
 
-  /** Switch to a different subsong (1-based). */
+  /**
+   * Switch to a different subsong (1-based). Updates `info.subsong` so
+   * consumers reading the field see current state rather than whichever
+   * subsong the player started on.
+   *
+   * Note: `info.playInterval` is NOT re-queried from the worklet after a
+   * subsong change, even though CIA-speed subsongs can have different
+   * timer periods. Consumers that need the exact post-switch interval
+   * should recompute it (parse the PSID header locally) or wait until
+   * we add a post-init ack message.
+   */
   selectSong(subsong: number): void {
     const msg: ToPsidWorkletMessage = { type: 'selectSong', subsong };
     this.node.port.postMessage(msg);
+    this.info.subsong = subsong;
   }
 
   /** Halt playback and silence the chip. */

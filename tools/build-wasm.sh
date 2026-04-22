@@ -106,11 +106,17 @@ RESID_SOURCES=(
 
 echo ""
 echo "==> Compiling reSID + wrapper to WASM"
+# -msimd128 enables the WebAssembly SIMD proposal (stable in Chrome 91+,
+# Firefox 89+, Safari 16.4+, Node 16.4+). Big win on reSID's FIR
+# resampler — the 125-tap convolution in SAMPLE_RESAMPLE / RESAMPLE_FASTMEM
+# auto-vectorizes to v128 MACs. No runtime feature detection needed for
+# the browsers we support.
 emcc \
   -O3 \
   -DNDEBUG \
   -fno-exceptions \
   -std=c++17 \
+  -msimd128 \
   -I "$RESID_DIR" \
   "${RESID_SOURCES[@]}" \
   "$NATIVE_DIR/resid-wrapper.cc" \
@@ -145,10 +151,12 @@ echo "==> Compiling fake6502 + reSID + sidplay wrapper to WASM"
 # -std=c++ on .c files. Each file uses its language default (C for .c,
 # C++ for .cc), which is fine — our reSID siddefs.h already picks the
 # conservative non-constexpr fallbacks, so no specific C++ std is needed.
+# -msimd128: enable WebAssembly SIMD; see resid.wasm build comment above.
 emcc \
   -O3 \
   -DNDEBUG \
   -fno-exceptions \
+  -msimd128 \
   -I "$RESID_DIR" \
   -I "$FAKE_DIR" \
   "${RESID_SOURCES[@]}" \

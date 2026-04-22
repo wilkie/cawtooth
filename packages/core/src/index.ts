@@ -75,8 +75,18 @@ export type { ChannelsListener, OplPlayerOptions } from './audio/opl-player.js';
 export { SidPlayer } from './audio/sid-player.js';
 export type { SidPlayerOptions } from './audio/sid-player.js';
 
-export { renderToPcm, renderToWav, encodeWav } from './audio/export.js';
-export type { RenderToPcmOptions, EncodeWavOptions } from './audio/export.js';
+export {
+  renderToPcm,
+  renderToWav,
+  renderSidTuneToPcm,
+  renderSidTuneToWav,
+  encodeWav,
+} from './audio/export.js';
+export type {
+  RenderToPcmOptions,
+  RenderSidTuneOptions,
+  EncodeWavOptions,
+} from './audio/export.js';
 
 export { OPL_PROCESSOR_NAME } from './worklet/opl-processor-name.js';
 export type { FromWorkletMessage, ToWorkletMessage } from './worklet/messages.js';
