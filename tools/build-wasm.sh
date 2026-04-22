@@ -130,6 +130,7 @@ SIDPLAY_EXPORTS='[
   "_cawtooth_sidplay_destroy",
   "_cawtooth_sidplay_load",
   "_cawtooth_sidplay_init",
+  "_cawtooth_sidplay_get_play_interval",
   "_cawtooth_sidplay_generate",
   "_cawtooth_sidplay_generate_channels",
   "_cawtooth_sidplay_peek",

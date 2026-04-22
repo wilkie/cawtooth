@@ -73,6 +73,12 @@ export interface PsidReadyMessage {
   /** Resolved model + clock the runtime is using. */
   model: SidChipModel;
   clockFrequency: number;
+  /**
+   * Resolved CPU cycles between play-routine invocations for the active
+   * subsong. Either the PAL/NTSC vblank period or a CIA Timer A value
+   * programmed by the tune's init routine (if the PSID speed bit says so).
+   */
+  playInterval: number;
 }
 
 export interface PsidErrorMessage {

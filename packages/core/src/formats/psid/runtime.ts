@@ -116,6 +116,13 @@ export class SidTune {
    * Returns the number of CPU cycles consumed by init, or -1 if the init
    * exceeded the wasm-level cycle cap (usually a sign of a malformed tune
    * or an IRQ-driven design we don't yet support).
+   *
+   * The PSID `speed` bitfield decides whether this subsong's play routine
+   * runs on vblank or on CIA 1 Timer A. For CIA-driven subsongs, the init
+   * routine writes the timer period to $DC04/$DC05; the wasm-level init
+   * reads those back after init completes and uses the 16-bit value as
+   * the per-frame cycle budget. Subsongs beyond 32 wrap their speed bit
+   * (mod 32) per PSID convention.
    */
   initSong(subsong: number): number {
     if (subsong < 1 || subsong > this.song.songs) {
@@ -123,12 +130,25 @@ export class SidTune {
         `cawtooth: subsong ${subsong} out of range [1, ${this.song.songs}]`,
       );
     }
+    const speedBitIndex = (subsong - 1) % 32;
+    const useCiaTimer = ((this.song.speed >>> speedBitIndex) & 1) === 1;
     return this.exports.cawtooth_sidplay_init(
       this.song.initAddress,
       subsong - 1,
       this.song.playAddress,
       this.cyclesPerFrame,
+      useCiaTimer ? 1 : 0,
     );
+  }
+
+  /**
+   * Resolved per-frame CPU cycle budget for the currently-initialized
+   * subsong. Either the PAL/NTSC vblank period (for speed-bit=0 subsongs)
+   * or the CIA Timer A value that the init routine programmed (for
+   * speed-bit=1 subsongs). Surface for inspection/UI.
+   */
+  get effectivePlayInterval(): number {
+    return this.exports.cawtooth_sidplay_get_play_interval();
   }
 
   /**

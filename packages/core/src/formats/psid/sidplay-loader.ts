@@ -25,8 +25,10 @@ export interface SidplayExports {
     initAddr: number,
     songNum: number,
     playAddr: number,
-    cyclesPerFrame: number,
+    cyclesPerFrameVblank: number,
+    useCiaTimer: number,
   ) => number;
+  readonly cawtooth_sidplay_get_play_interval: () => number;
   readonly cawtooth_sidplay_generate: (bufPtr: number, numSamples: number) => void;
   readonly cawtooth_sidplay_generate_channels: (
     stereoPtr: number,

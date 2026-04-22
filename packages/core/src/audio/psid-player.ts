@@ -42,6 +42,8 @@ export interface PsidPlaybackInfo {
   subsong: number;
   model: SidChipModel;
   clockFrequency: number;
+  /** CPU cycles between play-routine calls (vblank or CIA-driven). */
+  playInterval: number;
 }
 
 /**
@@ -140,6 +142,7 @@ export class PsidPlayer {
       subsong: ready_.subsong,
       model: ready_.model,
       clockFrequency: ready_.clockFrequency,
+      playInterval: ready_.playInterval,
     };
     return new PsidPlayer(ctx, ownsContext, node, info);
   }

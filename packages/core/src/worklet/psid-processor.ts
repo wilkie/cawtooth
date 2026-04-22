@@ -51,6 +51,7 @@ class CawtoothPsidProcessor extends AudioWorkletProcessor {
             subsong,
             model: this.tune.model,
             clockFrequency: this.tune.clockFrequency,
+            playInterval: this.tune.effectivePlayInterval,
           });
         } catch (err) {
           this.post({

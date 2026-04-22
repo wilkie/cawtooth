@@ -182,20 +182,74 @@ CAWTOOTH_EXPORT void cawtooth_sidplay_load(
  * The song_num is 0-indexed per PSID convention — JS callers should pass
  * startSong-1, not startSong.
  */
+/**
+ * Run the tune's init routine and resolve the per-frame play interval.
+ *
+ * `cycles_per_frame_vblank` is the fallback period (PAL 19656 or NTSC 17095).
+ * `use_cia_timer`: non-zero means the PSID `speed` bitfield said this
+ * subsong is CIA-driven — after init completes, we read CIA 1 Timer A
+ * ($DC04 low / $DC05 high) from emulated RAM and use that 16-bit value
+ * as the play interval instead of the vblank fallback. A CIA read of 0
+ * means init didn't program the timer; we keep the vblank fallback so
+ * the tune still plays at a reasonable tempo rather than hanging.
+ *
+ * Returns the number of CPU cycles consumed by init, or -1 on timeout.
+ */
 CAWTOOTH_EXPORT int32_t cawtooth_sidplay_init(
     uint16_t init_addr,
     uint8_t song_num,
     uint16_t play_addr,
-    int32_t cycles_per_frame
+    int32_t cycles_per_frame_vblank,
+    uint32_t use_cia_timer
 ) {
     // Reset the SID so subsong changes start from a clean register state.
     // libsidplayfp does the same between subsongs; tunes commonly assume
     // power-on SID state in their init routine.
     if (sid) sid->reset();
+
+    int32_t fallback = cycles_per_frame_vblank > 0 ? cycles_per_frame_vblank : 19656;
+
+    // Pre-program CIA 1 Timer A before init.
+    //
+    // For CIA-speed subsongs, match the KERNAL default state a real C64
+    // would have at the moment the player takes over — $4025 for PAL
+    // ($4295 NTSC), which gives the jiffy-clock IRQ rate of ~60 Hz.
+    // Some multi-speed tunes (e.g. Rob Hubbard's "The Human Race")
+    // rely on this default being in place and never reprogram CIA in
+    // their init routine. libsidplayfp does the same pre-set.
+    //
+    // For vblank-speed subsongs we zero the registers so stale CIA state
+    // from a prior subsong doesn't leak into anything that reads them.
+    if (use_cia_timer) {
+        uint16_t default_cia = (fallback >= 19000) ? 0x4025 : 0x4295;
+        ram[0xdc04] = (uint8_t)(default_cia & 0xff);
+        ram[0xdc05] = (uint8_t)((default_cia >> 8) & 0xff);
+    } else {
+        ram[0xdc04] = 0;
+        ram[0xdc05] = 0;
+    }
+
     play_addr_cached = play_addr;
-    cycles_per_play_frame = cycles_per_frame > 0 ? cycles_per_frame : 19656;
     cycles_until_next_play = 0;
-    return run_subroutine(init_addr, song_num, INIT_MAX_CYCLES);
+
+    int32_t init_cycles = run_subroutine(init_addr, song_num, INIT_MAX_CYCLES);
+
+    if (use_cia_timer) {
+        uint16_t period = (uint16_t)(ram[0xdc04] | (ram[0xdc05] << 8));
+        // 0 is the only truly "bad" value — can happen if init explicitly
+        // zeroed CIA. Fall back to vblank so we don't hang on zero-length
+        // frames.
+        cycles_per_play_frame = period > 0 ? (int32_t)period : fallback;
+    } else {
+        cycles_per_play_frame = fallback;
+    }
+
+    return init_cycles;
+}
+
+/** Return the resolved per-frame cycle budget, set by the most recent init. */
+CAWTOOTH_EXPORT int32_t cawtooth_sidplay_get_play_interval(void) {
+    return cycles_per_play_frame;
 }
 
 /**

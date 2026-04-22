@@ -16,6 +16,7 @@ const metaAuthor = document.getElementById('meta-author') as HTMLElement;
 const metaReleased = document.getElementById('meta-released') as HTMLElement;
 const metaChip = document.getElementById('meta-chip') as HTMLElement;
 const metaClock = document.getElementById('meta-clock') as HTMLElement;
+const metaPlayRate = document.getElementById('meta-play-rate') as HTMLElement;
 const scopeContainer = document.getElementById('scope') as HTMLElement;
 
 const scope: Oscilloscope = createOscilloscope(scopeContainer, {
@@ -49,6 +50,11 @@ function renderMeta(info: PsidPlaybackInfo): void {
   metaReleased.textContent = info.released || '';
   metaChip.textContent = info.model;
   metaClock.textContent = `${info.clockFrequency.toLocaleString()} Hz`;
+  // Calls-per-second from the resolved cycles-per-frame budget. Round to
+  // 2 decimals — PAL vblank isn't exactly 50 Hz (50.124), and CIA values
+  // can be arbitrary.
+  const hz = info.clockFrequency / info.playInterval;
+  metaPlayRate.textContent = `${info.playInterval.toLocaleString()} cycles (${hz.toFixed(2)} Hz)`;
   metaEl.hidden = false;
 
   subsongSel.innerHTML = '';

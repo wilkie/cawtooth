@@ -23,7 +23,17 @@ function peakAmplitude(buf: Float32Array): number {
  * into SID voice 1 during init, then play is a no-op (RTS). Produces audio
  * without needing the full 16 KB Batman fixture.
  */
-function buildTinyPsid(): Uint8Array {
+interface TinyPsidOptions {
+  speed?: number;
+  /**
+   * Optional 6502 bytes inserted into the init routine before the
+   * standard "program voice 1" sequence. Used to test CIA-timer
+   * programming — e.g. a snippet that writes to $DC04/$DC05.
+   */
+  initPrologue?: readonly number[];
+}
+
+function buildTinyPsid(opts: TinyPsidOptions = {}): Uint8Array {
   // Init routine: program voice 1 for a sustained triangle at ~440 Hz.
   // Setting sustain to 15 ($F0 in reg $D406) keeps the envelope from
   // decaying to silence so we get continuous audio for the whole test.
@@ -42,8 +52,9 @@ function buildTinyPsid(): Uint8Array {
   //   8D 04 D4   STA $D404       ; triangle + gate (last, so ADSR is armed)
   //   60         RTS
   const INIT_ADDR = 0x4000;
-  const PLAY_ADDR = 0x4020;
-  const initCode = new Uint8Array([
+  const PLAY_ADDR = 0x4100;
+  const prologue = new Uint8Array(opts.initPrologue ?? []);
+  const mainInit = new Uint8Array([
     0xa9, 0x45, 0x8d, 0x00, 0xd4,
     0xa9, 0x1d, 0x8d, 0x01, 0xd4,
     0xa9, 0x00, 0x8d, 0x05, 0xd4,
@@ -52,6 +63,9 @@ function buildTinyPsid(): Uint8Array {
     0xa9, 0x11, 0x8d, 0x04, 0xd4,
     0x60,
   ]);
+  const initCode = new Uint8Array(prologue.length + mainInit.length);
+  initCode.set(prologue, 0);
+  initCode.set(mainInit, prologue.length);
   // Play: RTS only.
   const playCode = new Uint8Array([0x60]);
 
@@ -67,7 +81,7 @@ function buildTinyPsid(): Uint8Array {
   view.setUint16(12, PLAY_ADDR, false);
   view.setUint16(14, 1, false); // 1 song
   view.setUint16(16, 1, false); // startSong=1
-  view.setUint32(18, 0, false); // speed=vblank
+  view.setUint32(18, opts.speed ?? 0, false); // speed bits
   const enc = new TextEncoder();
   header.set(enc.encode('TinyTest').subarray(0, 32), 22);
   header.set(enc.encode('cawtooth').subarray(0, 32), 54);
@@ -75,15 +89,18 @@ function buildTinyPsid(): Uint8Array {
   // flags: PAL (bits 2-3 = 01) + MOS6581 (bits 4-5 = 01)
   view.setUint16(118, (0b01 << 2) | (0b01 << 4), false);
 
-  // Payload: 2-byte PRG load address ($4000 LE) + 0x20 bytes of filler
-  // up to $4020 + play code.
-  const payloadSize = 2 + 0x20 + playCode.length;
-  const payload = new Uint8Array(payloadSize);
+  // Payload layout:
+  //   [0..1]        PRG load address ($4000 LE)
+  //   [2..]         init code at $4000
+  //   PLAY_ADDR-$4000 + 2
+  //                 play code at PLAY_ADDR ($4100, leaving ample room for
+  //                 any init prologue the caller injects)
+  const playOffset = 2 + (PLAY_ADDR - INIT_ADDR);
+  const payload = new Uint8Array(playOffset + playCode.length);
   payload[0] = 0x00;
   payload[1] = 0x40; // load addr = $4000
-  payload.set(initCode, 2); // code at $4000
-  // $4000 + initCode.length .. $4020 is zero-filled (harmless NOP-ish)
-  payload.set(playCode, 2 + 0x20); // play at $4020
+  payload.set(initCode, 2);
+  payload.set(playCode, playOffset);
 
   const out = new Uint8Array(header.length + payload.length);
   out.set(header, 0);
@@ -223,6 +240,73 @@ describe('SidTune (PSID runtime)', () => {
     const stereo = new Float32Array(64 * 2);
     const channels = new Float32Array(64); // need 64 * 3
     expect(() => tune.generateWithChannels(stereo, channels)).toThrow(/channelsOutput/);
+    tune.dispose();
+  });
+
+  it('vblank-speed subsongs use the PAL vblank interval', () => {
+    const tune = makeTune(buildTinyPsid()); // speed=0
+    tune.initSong(1);
+    // PAL vblank = 19656 cycles.
+    expect(tune.effectivePlayInterval).toBe(19656);
+    tune.dispose();
+  });
+
+  it('CIA-speed subsongs pick up the timer value programmed at init', () => {
+    // Init prologue: LDA #$34 / STA $DC04 / LDA #$12 / STA $DC05
+    // This programs CIA 1 Timer A to $1234 = 4660 cycles.
+    const prologue = [
+      0xa9, 0x34, 0x8d, 0x04, 0xdc,
+      0xa9, 0x12, 0x8d, 0x05, 0xdc,
+    ];
+    const tune = makeTune(buildTinyPsid({ speed: 1, initPrologue: prologue }));
+    tune.initSong(1);
+    expect(tune.effectivePlayInterval).toBe(0x1234); // 4660
+    tune.dispose();
+  });
+
+  it('CIA-speed subsongs inherit the KERNAL default CIA when init skips reprogramming', () => {
+    // speed bit says CIA, and init never touches $DC04/$DC05. A real
+    // C64 would have CIA 1 Timer A pre-programmed by the KERNAL ROM to
+    // $4025 (PAL, ~60 Hz jiffy rate). Some multi-speed tunes — e.g.
+    // Hubbard's "The Human Race" — rely on that default.
+    const tune = makeTune(buildTinyPsid({ speed: 1 }));
+    tune.initSong(1);
+    expect(tune.effectivePlayInterval).toBe(0x4025); // 16421 cycles ≈ 60 Hz
+    tune.dispose();
+  });
+
+  it('CIA-speed subsongs fall back to vblank if init explicitly zeroes the timer', () => {
+    // speed bit says CIA, and init explicitly writes 0 to $DC04/$DC05.
+    // That's an unusual but legitimate case (the tune doesn't want CIA);
+    // we fall back to vblank so we don't hang on a zero-cycle frame.
+    const prologue = [
+      0xa9, 0x00, 0x8d, 0x04, 0xdc,
+      0xa9, 0x00, 0x8d, 0x05, 0xdc,
+    ];
+    const tune = makeTune(buildTinyPsid({ speed: 1, initPrologue: prologue }));
+    tune.initSong(1);
+    expect(tune.effectivePlayInterval).toBe(19656);
+    tune.dispose();
+  });
+
+  it('refreshes CIA state between subsong changes', () => {
+    // First tune programs CIA with a specific value ($ABCD).
+    const prologueABCD = [
+      0xa9, 0xcd, 0x8d, 0x04, 0xdc,
+      0xa9, 0xab, 0x8d, 0x05, 0xdc,
+    ];
+    const tune = makeTune(buildTinyPsid({ speed: 1, initPrologue: prologueABCD }));
+    tune.initSong(1);
+    expect(tune.effectivePlayInterval).toBe(0xabcd);
+
+    // A second tune on a fresh wasm instance whose init doesn't touch
+    // CIA should land on the KERNAL default — not on the $ABCD value
+    // from the previous tune. Proves the pre-init CIA setup is fresh
+    // per-init, not sticky across tunes.
+    const noCiaTune = makeTune(buildTinyPsid({ speed: 1 }));
+    noCiaTune.initSong(1);
+    expect(noCiaTune.effectivePlayInterval).toBe(0x4025);
+    noCiaTune.dispose();
     tune.dispose();
   });
 
