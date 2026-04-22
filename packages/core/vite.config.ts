@@ -33,28 +33,40 @@ const libConfig: UserConfig = {
   },
 };
 
-// Worklet build: single self-contained ESM file. AudioWorkletGlobalScope has
-// no module loader we can rely on, so nothing may stay external.
-const workletConfig: UserConfig = {
-  build: {
-    outDir: 'dist/worklet',
-    emptyOutDir: false,
-    copyPublicDir: false,
-    target: 'es2022',
-    sourcemap: true,
-    minify: false,
-    lib: {
-      entry: 'src/worklet/opl-processor.ts',
-      formats: ['es'],
-      fileName: () => 'opl-processor.js',
-    },
-    rollupOptions: {
-      external: [],
-      output: {
-        inlineDynamicImports: true,
+// Worklet builds: each processor is a single self-contained ESM file —
+// AudioWorkletGlobalScope has no module loader we can rely on, so nothing
+// may stay external. We emit one bundle per chip family.
+function workletConfig(entry: string, outFile: string): UserConfig {
+  return {
+    build: {
+      outDir: 'dist/worklet',
+      emptyOutDir: false,
+      copyPublicDir: false,
+      target: 'es2022',
+      sourcemap: true,
+      minify: false,
+      lib: {
+        entry,
+        formats: ['es'],
+        fileName: () => outFile,
+      },
+      rollupOptions: {
+        external: [],
+        output: {
+          inlineDynamicImports: true,
+        },
       },
     },
-  },
-};
+  };
+}
 
-export default defineConfig(({ mode }) => (mode === 'worklet' ? workletConfig : libConfig));
+const oplWorkletConfig = workletConfig('src/worklet/opl-processor.ts', 'opl-processor.js');
+const sidWorkletConfig = workletConfig('src/worklet/sid-processor.ts', 'sid-processor.js');
+const psidWorkletConfig = workletConfig('src/worklet/psid-processor.ts', 'psid-processor.js');
+
+export default defineConfig(({ mode }) => {
+  if (mode === 'worklet') return oplWorkletConfig;
+  if (mode === 'worklet-sid') return sidWorkletConfig;
+  if (mode === 'worklet-psid') return psidWorkletConfig;
+  return libConfig;
+});

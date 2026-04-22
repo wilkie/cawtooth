@@ -15,6 +15,16 @@ EMSDK_COMMIT="main"
 # Update intentionally; record the resolved SHA here after setup.
 NUKED_OPL3_COMMIT="cfedb09efc03f1d7b5fc1f04dd449d77d8c49d50"
 
+# reSID (Dag Lem's MOS 6581/8580 emulator) source commit. Vendored for
+# the SID chip wrapper; see tools/setup-resid.sh.
+RESID_COMMIT="ef7873fc8c8379dc14cef8d9ccf9b3d34d0cc439"
+
+# fake6502 (ivop fork of Mike Chambers' MOS 6502 emulator) source commit.
+# BSD 2-clause. Used as the 6510 CPU core for PSID playback; see
+# tools/setup-fake6502.sh. The ivop fork has all undocumented NMOS opcodes
+# and consolidated bug fixes.
+FAKE6502_COMMIT="b52676f840983219b0b9baa13f1d0ebc07aac9f9"
+
 # AdPlug version used for the HERAD A/B harness
 # (tools/adplug-capture/). Not vendored — provided by the system package
 # (Debian: libadplug-dev). The harness is optional; the main test suite

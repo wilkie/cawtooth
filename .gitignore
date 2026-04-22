@@ -25,3 +25,5 @@ Thumbs.db
 
 tools/emsdk/
 tools/nuked-opl3/
+tools/resid/
+tools/fake6502/

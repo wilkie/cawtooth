@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>cawtooth — PSID playback</title>
+    <style>
+      body {
+        font-family:
+          system-ui,
+          -apple-system,
+          sans-serif;
+        padding: 2rem;
+        max-width: 48rem;
+        margin: 0 auto;
+        line-height: 1.5;
+      }
+      h1 {
+        margin-top: 0;
+      }
+      .row {
+        margin: 0.75rem 0;
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      label {
+        font-size: 0.9rem;
+      }
+      button {
+        font-size: 1rem;
+        padding: 0.5rem 1.25rem;
+        cursor: pointer;
+      }
+      button:disabled {
+        cursor: wait;
+        opacity: 0.6;
+      }
+      select,
+      input[type='file'] {
+        font-size: 0.95rem;
+        padding: 0.35rem 0.5rem;
+      }
+      .status {
+        margin-top: 1rem;
+        padding: 0.75rem 1rem;
+        background: #f4f4f4;
+        border-radius: 4px;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: 0.9rem;
+        white-space: pre-line;
+      }
+      .meta {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 0.25rem 1rem;
+        font-size: 0.9rem;
+        margin-top: 1rem;
+      }
+      .meta dt {
+        font-weight: 600;
+        color: #555;
+      }
+      .meta dd {
+        margin: 0;
+      }
+      code {
+        background: #f4f4f4;
+        padding: 0.1em 0.3em;
+        border-radius: 3px;
+      }
+      h2 {
+        margin-top: 2rem;
+        font-size: 1.1rem;
+      }
+      .scope-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+      }
+      .scope-voice {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .scope-voice canvas {
+        width: 100%;
+        height: 80px;
+        background: #0e1015;
+        border-radius: 3px;
+        display: block;
+      }
+      .scope-voice .voice-label {
+        font-size: 0.75rem;
+        color: #666;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>cawtooth — PSID playback</h1>
+    <p>
+      Plays a Commodore 64 <code>.sid</code> file end-to-end through a vendored fake6502 CPU emulator
+      driving our reSID SID chip emulator inside a single AudioWorklet. Matthew Cannon's "Batman, the
+      Movie" ships as a built-in sample; use the file picker to drop in any other PSID v1–v4 tune.
+    </p>
+    <div class="row">
+      <label>
+        Tune:
+        <select id="source">
+          <option value="builtin" selected>Batman, the Movie (Matthew Cannon, 1989)</option>
+          <option value="picker">Upload a .sid file…</option>
+        </select>
+      </label>
+      <input id="file" type="file" accept=".sid" style="display: none" />
+    </div>
+    <div class="row">
+      <button id="play">Play</button>
+      <button id="stop">Stop</button>
+      <label>
+        Subsong:
+        <select id="subsong" disabled></select>
+      </label>
+    </div>
+    <dl class="meta" id="meta" hidden>
+      <dt>Title</dt><dd id="meta-title"></dd>
+      <dt>Author</dt><dd id="meta-author"></dd>
+      <dt>Released</dt><dd id="meta-released"></dd>
+      <dt>Chip</dt><dd id="meta-chip"></dd>
+      <dt>Clock</dt><dd id="meta-clock"></dd>
+    </dl>
+    <div class="status" id="status">idle — click Play to initialize</div>
+
+    <h2>Per-voice oscilloscope</h2>
+    <p style="color: #666; font-size: 0.9rem; margin-top: -0.25rem">
+      Each canvas shows one of the SID's three voices directly from reSID, sampled at the output
+      rate. Amplitude is auto-scaled per voice so a single gated note fills the canvas even though
+      its raw level is well below the chip's peak mix level.
+    </p>
+    <div class="scope-grid" id="scope"></div>
+  </body>
+  <script type="module" src="/src/main.ts"></script>
+</html>

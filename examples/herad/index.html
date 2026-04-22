@@ -156,7 +156,32 @@
       <strong style="margin-right: 0.25rem">Export:</strong>
       <button id="export-wav" disabled title="Render to stereo PCM WAV">WAV</button>
       <button id="export-dro" disabled title="Re-encode as DOSBox Raw OPL">DRO</button>
-      <button id="export-imf" disabled title="Re-encode as IMF (OPL2 only)">IMF</button>
+      <button
+        id="export-imf"
+        disabled
+        title="Re-encode as IMF type-1 resampled to 560 Hz (Commander Keen, Bio Menace). Carries title/source/remarks metadata. Capped at 65 KB of events — use WLF if a song doesn't fit."
+      >
+        IMF (560 Hz, type-1)
+      </button>
+      <button
+        id="export-wlf"
+        disabled
+        title="Re-encode as WLF type-0 resampled to 700 Hz (Wolfenstein 3D, Spear of Destiny). No length limit, no metadata — works for any song."
+      >
+        WLF (700 Hz, type-0)
+      </button>
+      <label
+        title="How aggressively to strip redundant register writes before export. 'Lossless' and 'Subtle' are transparent; 'Compact' and 'Auto' may quantize pitch slides to fit IMF's 64 KB cap. WAV export ignores this."
+      >
+        Dedup mode:
+        <select id="dedup-mode">
+          <option value="off">Off</option>
+          <option value="lossless" selected>Lossless</option>
+          <option value="subtle">Subtle (~20 ms window)</option>
+          <option value="compact">Compact (~500 ms window)</option>
+          <option value="auto">Auto (escalate to fit IMF)</option>
+        </select>
+      </label>
     </div>
 
     <div class="status" id="status">idle — choose a file to begin</div>

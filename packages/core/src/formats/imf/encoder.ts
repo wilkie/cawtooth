@@ -19,8 +19,18 @@
 import type { RegisterEventStream, TimedRegisterStream } from '../../sequencer/types.js';
 
 export interface EncodeImfOptions {
-  /** Output variant. Default 'type1' (the common modern form with metadata). */
-  readonly variant?: 'type0' | 'type1';
+  /**
+   * Output variant. Default 'type1' (the common modern form with metadata).
+   *
+   * - 'type0' — no length header, no metadata, no size limit. Correct for
+   *   any stream but loses the metadata fields.
+   * - 'type1' — u16 length prefix + optional metadata tail. Imposes a
+   *   65,535-byte limit on the encoded event stream; throws if exceeded.
+   * - 'auto' — 'type1' when it fits AND metadata fields are present or
+   *   absent; otherwise 'type0'. Throws only if metadata was explicitly
+   *   requested but the stream won't fit in type-1.
+   */
+  readonly variant?: 'type0' | 'type1' | 'auto';
   /** Trailing metadata for Type 1. Omitted fields become empty strings. */
   readonly title?: string;
   readonly source?: string;
@@ -33,14 +43,37 @@ export interface EncodeImfOptions {
    *     only useful for debug.
    */
   readonly opl3?: 'throw' | 'drop' | 'mask';
+  /**
+   * Target playback tick rate for the output file, in Hz. When provided,
+   * delays are resampled from the source stream's `tickRate` to this
+   * value via `round(delay * targetTickRate / sourceTickRate)`.
+   *
+   * IMF does not record its own tick rate — the number is a convention
+   * between the file and the player. Common targets:
+   *   - 560 Hz: Commander Keen, Bio Menace, most .imf files
+   *   - 700 Hz: Wolfenstein 3D, Spear of Destiny, most .wlf files
+   *   - 280 Hz: Duke Nukem II
+   *
+   * Omit this option to pass delays through unchanged — correct when the
+   * source stream is already at the intended output rate (e.g. re-encoding
+   * an IMF file you just parsed). Supply a value when converting from a
+   * stream with a mismatched rate (HERAD's ~40 Hz → WLF 700 Hz, DRO's
+   * 1000 Hz → IMF 560 Hz, etc.).
+   */
+  readonly targetTickRate?: number;
 }
 
 const METADATA_MARKER = 0x1a;
 const MAX_DELAY_U16 = 0xffff;
 
 /**
- * Encode a stream as IMF. The delay units of the input are passed through
- * verbatim — the caller is responsible for any tick-rate conversion.
+ * Encode a stream as IMF.
+ *
+ * Delays pass through unchanged by default. Set `targetTickRate` to
+ * resample them — required when the source stream's rate doesn't match the
+ * rate the consumer will play the file at. When `targetTickRate` is set but
+ * `source.tickRate` is missing or zero, the encoder throws — it can't
+ * resample without knowing the source rate.
  */
 export function encodeImf(
   source: TimedRegisterStream | { stream: RegisterEventStream },
@@ -50,17 +83,58 @@ export function encodeImf(
   const variant = options.variant ?? 'type1';
   const opl3Mode = options.opl3 ?? 'throw';
 
-  const eventBytes = encodeEventStream(stream, opl3Mode);
+  // Resolve delay scaling once so the inner loop stays simple.
+  let delayScale = 1;
+  if (options.targetTickRate !== undefined) {
+    const sourceRate = 'tickRate' in source ? source.tickRate : undefined;
+    if (!sourceRate || sourceRate <= 0) {
+      throw new Error(
+        'cawtooth/imf: encodeImf({ targetTickRate }) requires the source stream ' +
+          'to carry a positive tickRate for resampling.',
+      );
+    }
+    delayScale = options.targetTickRate / sourceRate;
+  }
 
-  if (variant === 'type0') {
+  const eventBytes = encodeEventStream(stream, opl3Mode, delayScale);
+
+  const hasMetadata =
+    options.title !== undefined || options.source !== undefined || options.remarks !== undefined;
+  const fitsType1 = eventBytes.length <= 0xffff;
+
+  // Resolve the variant when 'auto' is in play.
+  let resolvedVariant: 'type0' | 'type1';
+  if (variant === 'auto') {
+    if (fitsType1) {
+      resolvedVariant = 'type1';
+    } else if (hasMetadata) {
+      throw new Error(
+        `cawtooth/imf: event stream is ${eventBytes.length} bytes, which exceeds the ` +
+          `type-1 length limit (65,535). Metadata was supplied, which requires type-1. ` +
+          `Options: drop the metadata and accept type-0, or shorten the song.`,
+      );
+    } else {
+      resolvedVariant = 'type0';
+    }
+  } else {
+    resolvedVariant = variant;
+  }
+
+  if (resolvedVariant === 'type0') {
     return eventBytes;
   }
 
-  // Type 1 wraps the event stream with a u16 LE length prefix and may carry
-  // trailing metadata. We emit the marker + 3 null-terminated strings when
-  // ANY metadata field is provided, mirroring what id's Muse editor wrote.
-  const hasMetadata =
-    options.title !== undefined || options.source !== undefined || options.remarks !== undefined;
+  // type-1 wraps the event stream with a u16 LE length prefix and may carry
+  // trailing metadata. We emit the 0x1A marker + 3 null-terminated strings
+  // when ANY metadata field is provided, mirroring what id's Muse editor wrote.
+  if (!fitsType1) {
+    throw new Error(
+      `cawtooth/imf: event stream is ${eventBytes.length} bytes, which exceeds the ` +
+        `type-1 u16 length field's 65,535-byte limit. Pass { variant: 'type0' } for a ` +
+        `headerless encoding, or { variant: 'auto' } to fall back automatically.`,
+    );
+  }
+
   const metadata = hasMetadata
     ? buildMetadata(options.title ?? '', options.source ?? '', options.remarks ?? '')
     : null;
@@ -79,17 +153,19 @@ export function encodeImf(
 
 /**
  * Turn the stream into a flat sequence of (reg, val, delay16) IMF events.
- * Delays greater than 65535 are split across multiple no-op (reg=0, val=0)
- * events whose delay fields sum to the intended total.
+ * Delays are multiplied by `delayScale` (1.0 = passthrough) and then split
+ * across multiple no-op (reg=0, val=0) events when any single value exceeds
+ * the u16 max.
  */
 function encodeEventStream(
   stream: RegisterEventStream,
   opl3Mode: NonNullable<EncodeImfOptions['opl3']>,
+  delayScale: number,
 ): Uint8Array {
   const { regs, values, delayTicks } = stream;
-  // Worst case: every event has a delay > u16 max and needs splitting. Pre-
-  // allocate generously; trim at the end.
   const bytes: number[] = [];
+
+  const scaledDelay = (d: number): number => (delayScale === 1 ? d : Math.round(d * delayScale));
 
   for (let i = 0; i < regs.length; i++) {
     const fullReg = regs[i];
@@ -106,7 +182,7 @@ function encodeEventStream(
       if (opl3Mode === 'drop') {
         // Skip the write; preserve its delay on a following no-op so timing
         // isn't lost.
-        emitDelayOnly(bytes, delayTicks[i]);
+        emitDelayOnly(bytes, scaledDelay(delayTicks[i]));
         continue;
       }
       reg = fullReg & 0xff; // 'mask'
@@ -114,9 +190,9 @@ function encodeEventStream(
       reg = fullReg;
     }
 
-    // Strategy: attach up to 65535 ticks of delay to the event itself; emit
-    // any overflow as separate no-op events afterward.
-    const delay = delayTicks[i];
+    // Attach up to 65535 ticks of delay to the event itself; emit any
+    // overflow as separate no-op events afterward.
+    const delay = scaledDelay(delayTicks[i]);
     const attached = delay > MAX_DELAY_U16 ? MAX_DELAY_U16 : delay;
     bytes.push(reg, val, attached & 0xff, (attached >> 8) & 0xff);
     let remaining = delay - attached;

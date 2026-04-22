@@ -1,5 +1,5 @@
-export type { OplChip, OplRegisterWrite } from './chip/types.js';
-export { OPL_CHANNEL_COUNT } from './chip/types.js';
+export type { Chip, OplChip, OplRegisterWrite, PerVoiceChip } from './chip/types.js';
+export { OPL_CHANNEL_COUNT, supportsPerVoiceOutput } from './chip/types.js';
 export {
   asNukedOpl3Exports,
   compileNukedOpl3,
@@ -9,12 +9,35 @@ export {
 export type { NukedOpl3Exports } from './chip/loader.js';
 export { NukedOpl3Chip } from './chip/nuked-opl3.js';
 
+export {
+  asReSidExports,
+  compileReSid,
+  createReSidImports,
+  instantiateReSid,
+} from './chip/resid-loader.js';
+export type { ReSidExports } from './chip/resid-loader.js';
+export {
+  SidChip,
+  SID_CLOCK_PAL,
+  SID_CLOCK_NTSC,
+  SID_VOICE_COUNT,
+} from './chip/resid-sid.js';
+export type {
+  SidChipModel,
+  SidChipOptions,
+  SidSamplingMethod,
+} from './chip/resid-sid.js';
+
 export type {
   RegisterEventStream,
   RegisterStreamTiming,
   TimedRegisterStream,
 } from './sequencer/types.js';
 export { RegisterSequencer } from './sequencer/register-sequencer.js';
+export {
+  dedupRegisterEventStream,
+  windowedDedupRegisterEventStream,
+} from './sequencer/transforms.js';
 
 export { parseImf } from './formats/imf/parser.js';
 export type { ImfSong, ParseImfOptions } from './formats/imf/parser.js';
@@ -49,8 +72,50 @@ export type {
 export { OplPlayer } from './audio/opl-player.js';
 export type { ChannelsListener, OplPlayerOptions } from './audio/opl-player.js';
 
+export { SidPlayer } from './audio/sid-player.js';
+export type { SidPlayerOptions } from './audio/sid-player.js';
+
 export { renderToPcm, renderToWav, encodeWav } from './audio/export.js';
 export type { RenderToPcmOptions, EncodeWavOptions } from './audio/export.js';
 
 export { OPL_PROCESSOR_NAME } from './worklet/opl-processor-name.js';
 export type { FromWorkletMessage, ToWorkletMessage } from './worklet/messages.js';
+
+export { SID_PROCESSOR_NAME } from './worklet/sid-processor-name.js';
+export type {
+  FromSidWorkletMessage,
+  SidRegisterWrite,
+  ToSidWorkletMessage,
+} from './worklet/sid-messages.js';
+
+export { parsePsid } from './formats/psid/parser.js';
+export type {
+  PsidClock,
+  PsidFlags,
+  PsidMagic,
+  PsidSidModel,
+  PsidSong,
+} from './formats/psid/types.js';
+export {
+  SidTune,
+  PAL_CYCLES_PER_FRAME,
+  NTSC_CYCLES_PER_FRAME,
+} from './formats/psid/runtime.js';
+export type { SidTuneOptions } from './formats/psid/runtime.js';
+export {
+  asSidplayExports,
+  compileSidplay,
+  createSidplayImports,
+  instantiateSidplay,
+} from './formats/psid/sidplay-loader.js';
+export type { SidplayExports } from './formats/psid/sidplay-loader.js';
+
+export { PsidPlayer } from './audio/psid-player.js';
+export type { PsidPlayerCreateOptions, PsidPlaybackInfo } from './audio/psid-player.js';
+
+export { PSID_PROCESSOR_NAME } from './worklet/psid-processor-name.js';
+export type {
+  FromPsidWorkletMessage,
+  ToPsidWorkletMessage,
+  PsidReadyMessage,
+} from './worklet/psid-messages.js';

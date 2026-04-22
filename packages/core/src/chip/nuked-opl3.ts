@@ -14,6 +14,7 @@ const INITIAL_SCRATCH_FRAMES = 1024;
  */
 export class NukedOpl3Chip implements OplChip {
   readonly sampleRate: number;
+  readonly voiceCount = OPL_CHANNEL_COUNT;
 
   private readonly exports: NukedOpl3Exports;
   private readonly chipPtr: number;

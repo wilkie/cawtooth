@@ -1,0 +1,18 @@
+diff --git a/src/sid.h b/src/sid.h
+index d86bbf8..8559257 100644
+--- a/src/sid.h
++++ b/src/sid.h
+@@ -96,6 +96,13 @@ public:
+   // 16-bit output (AUDIO OUT).
+   short output();
+ 
++  // cawtooth patch: per-voice amplitude-modulated output, range
++  // [-2048*255, 2047*255] (20-bit signed). Snapshots the voice at the
++  // chip's current internal state — callers are expected to read this
++  // immediately after each sample-producing clock() call. Used by the
++  // PerVoiceChip surface for oscilloscope visualization.
++  int voice_output(int i) { return voice[i].output(); }
++
+  protected:
+   static double I0(double x);
+   int clock_fast(cycle_count& delta_t, short* buf, int n, int interleave);
