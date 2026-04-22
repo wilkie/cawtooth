@@ -50,6 +50,11 @@ static uint16_t play_addr_cached = 0;
 static int32_t cycles_per_play_frame = 19656;  // PAL C64 default
 static int32_t cycles_until_next_play = 0;
 
+// RSID-specific flag set at init. When true, the play routine is called
+// "IRQ-style" (status + PC pushed onto the stack so the tune can end the
+// handler with RTI) instead of as a plain JSR (RTS-ending).
+static bool rsid_mode = false;
+
 // Cap cycles spent inside a single JSR-equivalent. Init routines can be
 // long (decompressors, table builds); play routines should finish in well
 // under a frame. If we exceed the cap we bail rather than hanging the
@@ -57,12 +62,13 @@ static int32_t cycles_until_next_play = 0;
 static const int32_t INIT_MAX_CYCLES = 20000000;   // ~20s of C64 time
 static const int32_t PLAY_MAX_CYCLES = 500000;     // ~500ms of C64 time
 
-// Sentinel RTS target: after calling init/play we want to detect return
-// without installing real interrupt vectors. We push $0000 as the "return
-// address" so RTS pulls $00,$00 and the 6502's RTS-increment makes PC=$0001.
-// Then we watch for PC==$0001 and stop the step loop. $0001 on a real C64
-// is the processor I/O port, but nothing in PSID init/play code ever
-// branches through it as code, so this is a reliable sentinel.
+// Sentinel for subroutine returns. For a JSR-style call we push $0000 as
+// the "return address" so RTS pulls $00,$00 and the 6502's RTS-increment
+// makes PC=$0001. For an IRQ-style (RTI-ending) call we push $0000,$0001
+// for PC + a zero status byte, so RTI lands at exactly PC=$0001 too. In
+// both cases we watch for PC==$0001 and stop the step loop. $0001 on a
+// real C64 is the processor I/O port, but nothing in tune init/play code
+// ever branches through it as code, so this is a reliable sentinel.
 static const uint16_t RETURN_SENTINEL = 0x0001;
 
 } // namespace
@@ -108,6 +114,35 @@ static int32_t run_subroutine(uint16_t entry, uint8_t a, int32_t max_cycles) {
     ram[0x01fe] = 0x00;
     SP = 0xfd;
     A = a;
+    X = 0;
+    Y = 0;
+    PC = entry;
+
+    int32_t cycles = 0;
+    while (PC != RETURN_SENTINEL && cycles < max_cycles) {
+        cycles += step6502();
+    }
+    return (PC == RETURN_SENTINEL) ? cycles : -1;
+}
+
+/**
+ * Set up the CPU to enter `entry` as if from a hardware IRQ and run
+ * until the handler RTIs (or RTS-es, defensively) back to the sentinel.
+ * RSID play routines live at the IRQ vector and end with RTI, which
+ * pops 3 bytes (status + PC lo + PC hi) rather than RTS's 2-byte PC pop.
+ *
+ * Stack setup matches what hardware does on IRQ entry:
+ *   [$01FF] = $00    <- PC high
+ *   [$01FE] = $01    <- PC low    (RTI: PC high<<8 | PC low = $0001)
+ *   [$01FD] = $00    <- status    (RTI pops this first; any value OK)
+ *   SP = $FC
+ */
+static int32_t run_irq_handler(uint16_t entry, int32_t max_cycles) {
+    ram[0x01ff] = 0x00;
+    ram[0x01fe] = 0x01;
+    ram[0x01fd] = 0x00;
+    SP = 0xfc;
+    A = 0;
     X = 0;
     Y = 0;
     PC = entry;
@@ -183,15 +218,28 @@ CAWTOOTH_EXPORT void cawtooth_sidplay_load(
  * startSong-1, not startSong.
  */
 /**
- * Run the tune's init routine and resolve the per-frame play interval.
+ * Run the tune's init routine and resolve the per-frame play address +
+ * interval.
  *
- * `cycles_per_frame_vblank` is the fallback period (PAL 19656 or NTSC 17095).
- * `use_cia_timer`: non-zero means the PSID `speed` bitfield said this
- * subsong is CIA-driven — after init completes, we read CIA 1 Timer A
- * ($DC04 low / $DC05 high) from emulated RAM and use that 16-bit value
- * as the play interval instead of the vblank fallback. A CIA read of 0
- * means init didn't program the timer; we keep the vblank fallback so
- * the tune still plays at a reasonable tempo rather than hanging.
+ * Parameters:
+ *   init_addr, song_num, play_addr:
+ *     From the PSID/RSID header. For RSID files play_addr is always 0 —
+ *     the tune installs its own IRQ handler during init, and we read the
+ *     resolved address from either $0314/$0315 (KERNAL soft vector) or
+ *     $FFFE/$FFFF (CPU hardware vector) post-init.
+ *   cycles_per_frame_vblank:
+ *     Fallback period (PAL 19656 or NTSC 17095) used for vblank-speed
+ *     subsongs, and for CIA-speed subsongs where init explicitly zeroes
+ *     the timer.
+ *   use_cia_timer:
+ *     Non-zero → read CIA 1 Timer A post-init and use it as the play
+ *     interval. Automatically forced for RSID files (always CIA-driven).
+ *     Pre-programs CIA to the KERNAL default ($4025 PAL / $4295 NTSC)
+ *     so tunes that don't reprogram CIA still get a sensible rate.
+ *   is_rsid:
+ *     Non-zero for RSID files. Changes playback behavior: the play
+ *     routine is invoked IRQ-style (RTI-ending) instead of JSR-style,
+ *     and we resolve play_addr from vectors if header said 0.
  *
  * Returns the number of CPU cycles consumed by init, or -1 on timeout.
  */
@@ -200,7 +248,8 @@ CAWTOOTH_EXPORT int32_t cawtooth_sidplay_init(
     uint8_t song_num,
     uint16_t play_addr,
     int32_t cycles_per_frame_vblank,
-    uint32_t use_cia_timer
+    uint32_t use_cia_timer,
+    uint32_t is_rsid
 ) {
     // Reset the SID so subsong changes start from a clean register state.
     // libsidplayfp does the same between subsongs; tunes commonly assume
@@ -208,6 +257,27 @@ CAWTOOTH_EXPORT int32_t cawtooth_sidplay_init(
     if (sid) sid->reset();
 
     int32_t fallback = cycles_per_frame_vblank > 0 ? cycles_per_frame_vblank : 19656;
+    rsid_mode = is_rsid != 0;
+
+    // RSID tunes expect a closer-to-real C64 environment. Set up the
+    // processor port at $01 to the standard banking (CPU sees RAM at
+    // $0000-$9FFF, BASIC + I/O + KERNAL mapped above that). Clear the
+    // KERNAL soft IRQ vector and the CPU IRQ vector so we can detect
+    // which one (if any) the tune's init wires up.
+    if (rsid_mode) {
+        ram[0x0000] = 0x2f;  // data direction register: default
+        ram[0x0001] = 0x37;  // processor port: KERNAL + BASIC + I/O all in
+        ram[0x0314] = 0;
+        ram[0x0315] = 0;
+        ram[0xfffe] = 0;
+        ram[0xffff] = 0;
+    }
+
+    // RSID playback is always CIA-timer-driven — the IRQ that invokes
+    // the tune's play handler on real hardware comes from CIA 1 Timer A.
+    // Force the CIA path so we pre-program the default and sample the
+    // period the same way as a CIA-speed PSID subsong.
+    uint32_t effective_cia = use_cia_timer || rsid_mode;
 
     // Pre-program CIA 1 Timer A before init.
     //
@@ -220,7 +290,7 @@ CAWTOOTH_EXPORT int32_t cawtooth_sidplay_init(
     //
     // For vblank-speed subsongs we zero the registers so stale CIA state
     // from a prior subsong doesn't leak into anything that reads them.
-    if (use_cia_timer) {
+    if (effective_cia) {
         uint16_t default_cia = (fallback >= 19000) ? 0x4025 : 0x4295;
         ram[0xdc04] = (uint8_t)(default_cia & 0xff);
         ram[0xdc05] = (uint8_t)((default_cia >> 8) & 0xff);
@@ -234,7 +304,20 @@ CAWTOOTH_EXPORT int32_t cawtooth_sidplay_init(
 
     int32_t init_cycles = run_subroutine(init_addr, song_num, INIT_MAX_CYCLES);
 
-    if (use_cia_timer) {
+    // RSID resolution: header play_addr is always 0. The tune's init
+    // installed its own IRQ handler — check the KERNAL soft vector
+    // ($0314/$0315) first (used by tunes that leave the KERNAL ROM
+    // mapped), then the CPU hardware IRQ vector ($FFFE/$FFFF) for
+    // tunes that bank out KERNAL. If both are zero we have no handler
+    // and generate() will silently produce whatever the post-init SID
+    // state emits.
+    if (rsid_mode && play_addr_cached == 0) {
+        uint16_t soft = (uint16_t)(ram[0x0314] | (ram[0x0315] << 8));
+        uint16_t hard = (uint16_t)(ram[0xfffe] | (ram[0xffff] << 8));
+        play_addr_cached = soft != 0 ? soft : hard;
+    }
+
+    if (effective_cia) {
         uint16_t period = (uint16_t)(ram[0xdc04] | (ram[0xdc05] << 8));
         // 0 is the only truly "bad" value — can happen if init explicitly
         // zeroed CIA. Fall back to vblank so we don't hang on zero-length
@@ -265,7 +348,11 @@ CAWTOOTH_EXPORT void cawtooth_sidplay_generate(int16_t* buf, uint32_t num_sample
         // Time to fire the play routine?
         if (cycles_until_next_play <= 0) {
             if (play_addr_cached != 0) {
-                run_subroutine(play_addr_cached, 0, PLAY_MAX_CYCLES);
+                if (rsid_mode) {
+                    run_irq_handler(play_addr_cached, PLAY_MAX_CYCLES);
+                } else {
+                    run_subroutine(play_addr_cached, 0, PLAY_MAX_CYCLES);
+                }
             }
             cycles_until_next_play += cycles_per_play_frame;
         }
@@ -306,7 +393,11 @@ CAWTOOTH_EXPORT void cawtooth_sidplay_generate_channels(
         // Fire the play routine when the per-frame cycle budget expires.
         if (cycles_until_next_play <= 0) {
             if (play_addr_cached != 0) {
-                run_subroutine(play_addr_cached, 0, PLAY_MAX_CYCLES);
+                if (rsid_mode) {
+                    run_irq_handler(play_addr_cached, PLAY_MAX_CYCLES);
+                } else {
+                    run_subroutine(play_addr_cached, 0, PLAY_MAX_CYCLES);
+                }
             }
             cycles_until_next_play += cycles_per_play_frame;
         }

@@ -132,12 +132,17 @@ export class SidTune {
     }
     const speedBitIndex = (subsong - 1) % 32;
     const useCiaTimer = ((this.song.speed >>> speedBitIndex) & 1) === 1;
+    // RSID files always use CIA-timer playback driven by an IRQ handler
+    // the tune installs. The wasm-level init honours this regardless of
+    // the speed bit (which the RSID spec pins at 0 anyway).
+    const isRsid = this.song.magic === 'RSID';
     return this.exports.cawtooth_sidplay_init(
       this.song.initAddress,
       subsong - 1,
       this.song.playAddress,
       this.cyclesPerFrame,
       useCiaTimer ? 1 : 0,
+      isRsid ? 1 : 0,
     );
   }
 

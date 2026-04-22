@@ -108,6 +108,75 @@ function buildTinyPsid(opts: TinyPsidOptions = {}): Uint8Array {
   return out;
 }
 
+/**
+ * Minimum viable RSID fixture. Init does the same voice-1-triangle SID
+ * setup as `buildTinyPsid`, then writes a user-chosen IRQ handler
+ * address into one of the two vectors and returns with RTS. The handler
+ * is placed at the requested location and is just an RTI opcode.
+ */
+function buildTinyRsid(opts: { handlerVector: 'soft' | 'hard' } = { handlerVector: 'soft' }): Uint8Array {
+  const INIT_ADDR = 0x4000;
+  const HANDLER_ADDR = 0x4100;
+
+  // Install IRQ handler at either $0314/$0315 (KERNAL soft vector) or
+  // $FFFE/$FFFF (hardware IRQ vector). Both should work per our resolver;
+  // the test asserts whichever we choose.
+  const vectorLo = opts.handlerVector === 'soft' ? 0x14 : 0xfe;
+  const vectorHi = opts.handlerVector === 'soft' ? 0x15 : 0xff;
+  const vectorPage = opts.handlerVector === 'soft' ? 0x03 : 0xff;
+  const installCode = new Uint8Array([
+    0xa9, HANDLER_ADDR & 0xff, 0x8d, vectorLo, vectorPage,
+    0xa9, (HANDLER_ADDR >> 8) & 0xff, 0x8d, vectorHi, vectorPage,
+  ]);
+
+  // Same SID setup as the tiny PSID: voice 1 triangle, sustained envelope.
+  const sidSetup = new Uint8Array([
+    0xa9, 0x45, 0x8d, 0x00, 0xd4,
+    0xa9, 0x1d, 0x8d, 0x01, 0xd4,
+    0xa9, 0x00, 0x8d, 0x05, 0xd4,
+    0xa9, 0xf0, 0x8d, 0x06, 0xd4,
+    0xa9, 0x0f, 0x8d, 0x18, 0xd4,
+    0xa9, 0x11, 0x8d, 0x04, 0xd4,
+    0x60, // RTS
+  ]);
+  const initCode = new Uint8Array(installCode.length + sidSetup.length);
+  initCode.set(installCode, 0);
+  initCode.set(sidSetup, installCode.length);
+
+  // IRQ handler — just return cleanly. The chip state set up by init
+  // keeps producing audio; the handler has no per-frame work to do.
+  const handlerCode = new Uint8Array([0x40]); // RTI
+
+  const header = new Uint8Array(0x7c);
+  const view = new DataView(header.buffer);
+  header.set([0x52, 0x53, 0x49, 0x44]); // 'RSID'
+  view.setUint16(4, 2, false);
+  view.setUint16(6, 0x7c, false);
+  view.setUint16(8, 0, false); // loadAddress field 0 → first 2 payload bytes are PRG header
+  view.setUint16(10, INIT_ADDR, false);
+  view.setUint16(12, 0, false); // playAddress: always 0 for RSID
+  view.setUint16(14, 1, false); // 1 song
+  view.setUint16(16, 1, false); // startSong=1
+  view.setUint32(18, 0, false); // speed: always 0 for RSID
+  const enc = new TextEncoder();
+  header.set(enc.encode('TinyRsid').subarray(0, 32), 22);
+  header.set(enc.encode('cawtooth').subarray(0, 32), 54);
+  header.set(enc.encode('2026').subarray(0, 32), 86);
+  view.setUint16(118, (0b01 << 2) | (0b01 << 4), false); // PAL + MOS6581
+
+  const handlerOffset = 2 + (HANDLER_ADDR - INIT_ADDR);
+  const payload = new Uint8Array(handlerOffset + handlerCode.length);
+  payload[0] = 0x00;
+  payload[1] = 0x40; // load addr = $4000
+  payload.set(initCode, 2);
+  payload.set(handlerCode, handlerOffset);
+
+  const out = new Uint8Array(header.length + payload.length);
+  out.set(header, 0);
+  out.set(payload, header.length);
+  return out;
+}
+
 describe('SidTune (PSID runtime)', () => {
   let wasmModule: WebAssembly.Module;
 
@@ -307,6 +376,51 @@ describe('SidTune (PSID runtime)', () => {
     noCiaTune.initSong(1);
     expect(noCiaTune.effectivePlayInterval).toBe(0x4025);
     noCiaTune.dispose();
+    tune.dispose();
+  });
+
+  it('resolves an RSID play handler from the KERNAL soft vector ($0314)', () => {
+    const tune = makeTune(buildTinyRsid({ handlerVector: 'soft' }));
+    expect(tune.song.magic).toBe('RSID');
+    expect(tune.song.playAddress).toBe(0);
+
+    tune.initSong(1);
+
+    // After init, $0314/$0315 should hold the handler address $4100.
+    expect(tune.peek(0x0314)).toBe(0x00);
+    expect(tune.peek(0x0315)).toBe(0x41);
+
+    // RSID is always CIA-driven → KERNAL default until tune reprograms.
+    expect(tune.effectivePlayInterval).toBe(0x4025);
+
+    // Produce audio to confirm the RTI-ending handler doesn't crash the
+    // player loop and the SID's init-programmed state still sounds.
+    tune.generate(new Float32Array(SAMPLE_RATE * 2));
+    const out = new Float32Array(1024 * 2);
+    tune.generate(out);
+    expect(peakAmplitude(out)).toBeGreaterThan(0.01);
+    tune.dispose();
+  });
+
+  it('falls back to the hardware IRQ vector ($FFFE) when $0314 is empty', () => {
+    const tune = makeTune(buildTinyRsid({ handlerVector: 'hard' }));
+    tune.initSong(1);
+    expect(tune.peek(0xfffe)).toBe(0x00);
+    expect(tune.peek(0xffff)).toBe(0x41);
+
+    tune.generate(new Float32Array(SAMPLE_RATE * 2));
+    const out = new Float32Array(1024 * 2);
+    tune.generate(out);
+    expect(peakAmplitude(out)).toBeGreaterThan(0.01);
+    tune.dispose();
+  });
+
+  it('RSID pre-sets the processor port for standard C64 banking', () => {
+    const tune = makeTune(buildTinyRsid());
+    tune.initSong(1);
+    // $01 should be $37 (KERNAL + BASIC + I/O all mapped in), the
+    // standard post-boot C64 banking state RSID tunes expect.
+    expect(tune.peek(0x0001)).toBe(0x37);
     tune.dispose();
   });
 
