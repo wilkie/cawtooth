@@ -1,10 +1,16 @@
 import {
   PsidPlayer,
   SidTune,
+  computeSidTuneMd5,
   createSidplayImports,
+  lookupSongLengths,
   parsePsid,
+  parseSongLengthsDb,
   renderSidTuneToWav,
   type PsidPlaybackInfo,
+  type PsidSong,
+  type SongLengths,
+  type SongLengthsDb,
 } from 'cawtooth';
 import workletUrl from 'cawtooth/worklet/psid?url';
 import wasmUrl from 'cawtooth/wasm/sidplay.wasm?url';
@@ -24,9 +30,12 @@ const metaReleased = document.getElementById('meta-released') as HTMLElement;
 const metaChip = document.getElementById('meta-chip') as HTMLElement;
 const metaClock = document.getElementById('meta-clock') as HTMLElement;
 const metaPlayRate = document.getElementById('meta-play-rate') as HTMLElement;
+const metaDuration = document.getElementById('meta-duration') as HTMLElement;
 const scopeContainer = document.getElementById('scope') as HTMLElement;
 const downloadBtn = document.getElementById('download') as HTMLButtonElement;
 const downloadLengthSel = document.getElementById('download-length') as HTMLSelectElement;
+const songlengthsFile = document.getElementById('songlengths-file') as HTMLInputElement;
+const songlengthsStatus = document.getElementById('songlengths-status') as HTMLElement;
 
 const scope: Oscilloscope = createOscilloscope(scopeContainer, {
   voiceCount: 3,
@@ -36,6 +45,8 @@ const scope: Oscilloscope = createOscilloscope(scopeContainer, {
 let player: PsidPlayer | null = null;
 let unsubscribeScope: (() => void) | null = null;
 let pendingSidBytes: ArrayBuffer | null = null;
+let songlengthsDb: SongLengthsDb | null = null;
+let currentSong: PsidSong | null = null;
 // The bytes of the currently-loaded tune, kept so the download handler
 // can re-parse + re-render offline. PsidPlayer.create doesn't transfer
 // sidBytes, so this reference stays live.
@@ -60,6 +71,33 @@ async function loadPicked(): Promise<ArrayBuffer> {
   return await file.arrayBuffer();
 }
 
+function formatDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds - m * 60;
+  return `${m}:${s.toFixed(3).padStart(6, '0')}`;
+}
+
+function renderDuration(): void {
+  if (!currentSong || !songlengthsDb) {
+    metaDuration.textContent = songlengthsDb
+      ? '—'
+      : 'load Songlengths.md5 to show';
+    return;
+  }
+  const entry = lookupSongLengths(currentSong, songlengthsDb);
+  if (!entry) {
+    metaDuration.textContent = `not in database (hash: ${computeSidTuneMd5(currentSong)})`;
+    return;
+  }
+  const subsong = player?.info.subsong ?? currentSong.startSong;
+  const idx = Math.min(subsong - 1, entry.durations.length - 1);
+  const thisSub = entry.durations[idx];
+  const total = entry.durations.reduce((a, b) => a + b, 0);
+  metaDuration.textContent =
+    `subsong ${subsong}: ${formatDuration(thisSub)}  ` +
+    `(all ${entry.count}: ${formatDuration(total)})`;
+}
+
 function renderMeta(info: PsidPlaybackInfo): void {
   metaTitle.textContent = info.name || '(unnamed)';
   metaAuthor.textContent = info.author || '(unknown)';
@@ -71,6 +109,7 @@ function renderMeta(info: PsidPlaybackInfo): void {
   // can be arbitrary.
   const hz = info.clockFrequency / info.playInterval;
   metaPlayRate.textContent = `${info.playInterval.toLocaleString()} cycles (${hz.toFixed(2)} Hz)`;
+  renderDuration();
   metaEl.hidden = false;
 
   subsongSel.innerHTML = '';
@@ -106,6 +145,7 @@ playBtn.addEventListener('click', async () => {
       unsubscribeScope = null;
       await player.dispose();
       player = null;
+      currentSong = null;
     }
 
     const sidBytes =
@@ -113,6 +153,10 @@ playBtn.addEventListener('click', async () => {
       (sourceSel.value === 'picker' ? await loadPicked() : await loadBatman());
 
     currentSidBytes = sidBytes;
+    // Parse locally so the duration lookup has something to hash. This
+    // duplicates the parse PsidPlayer.create does internally, but the
+    // cost is trivial relative to the wasm + worklet bring-up.
+    currentSong = parsePsid(new Uint8Array(sidBytes));
 
     player = await PsidPlayer.create({
       workletUrl,
@@ -149,7 +193,23 @@ subsongSel.addEventListener('change', () => {
   if (!player) return;
   const sub = Number(subsongSel.value);
   player.selectSong(sub);
+  renderDuration();
   setStatus(`playing — subsong ${sub}/${player.info.songs}`);
+});
+
+songlengthsFile.addEventListener('change', async () => {
+  const file = songlengthsFile.files?.[0];
+  if (!file) return;
+  songlengthsStatus.textContent = 'loading…';
+  try {
+    const text = await file.text();
+    const db = parseSongLengthsDb(text);
+    songlengthsDb = db;
+    songlengthsStatus.textContent = `${db.size.toLocaleString()} entries loaded`;
+    renderDuration();
+  } catch (err) {
+    songlengthsStatus.textContent = `error: ${err instanceof Error ? err.message : String(err)}`;
+  }
 });
 
 async function ensureWasmModule(): Promise<WebAssembly.Module> {

@@ -108,6 +108,13 @@ export type {
   PsidSong,
 } from './formats/psid/types.js';
 export {
+  computeSidTuneMd5,
+  lookupSongLengths,
+  md5,
+  parseSongLengthsDb,
+} from './formats/psid/songlengths.js';
+export type { SongLengths, SongLengthsDb } from './formats/psid/songlengths.js';
+export {
   SidTune,
   PAL_CYCLES_PER_FRAME,
   NTSC_CYCLES_PER_FRAME,

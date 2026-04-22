@@ -135,6 +135,13 @@
         </select>
       </label>
     </div>
+    <div class="row">
+      <label>
+        HVSC Songlengths.md5:
+        <input id="songlengths-file" type="file" accept=".md5,text/plain" />
+      </label>
+      <span id="songlengths-status" style="color: #666; font-size: 0.85rem"></span>
+    </div>
     <dl class="meta" id="meta" hidden>
       <dt>Title</dt><dd id="meta-title"></dd>
       <dt>Author</dt><dd id="meta-author"></dd>
@@ -142,6 +149,7 @@
       <dt>Chip</dt><dd id="meta-chip"></dd>
       <dt>Clock</dt><dd id="meta-clock"></dd>
       <dt>Play rate</dt><dd id="meta-play-rate"></dd>
+      <dt>Duration</dt><dd id="meta-duration">—</dd>
     </dl>
     <div class="status" id="status">idle — click Play to initialize</div>
 
