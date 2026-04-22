@@ -94,6 +94,7 @@ export type { FromWorkletMessage, ToWorkletMessage } from './worklet/messages.js
 export { SID_PROCESSOR_NAME } from './worklet/sid-processor-name.js';
 export type {
   FromSidWorkletMessage,
+  SidChannelsMessage,
   SidRegisterWrite,
   ToSidWorkletMessage,
 } from './worklet/sid-messages.js';

@@ -1,4 +1,4 @@
-import { SidChip } from '../chip/resid-sid.js';
+import { SidChip, SID_VOICE_COUNT } from '../chip/resid-sid.js';
 import { createReSidImports } from '../chip/resid-loader.js';
 import type { ToSidWorkletMessage, FromSidWorkletMessage } from './sid-messages.js';
 import { SID_PROCESSOR_NAME } from './sid-processor-name.js';
@@ -6,14 +6,19 @@ import { SID_PROCESSOR_NAME } from './sid-processor-name.js';
 class CawtoothSidProcessor extends AudioWorkletProcessor {
   private chip: SidChip | null = null;
   private interleaved: Float32Array | null = null;
+  private channelsSubscribed = false;
 
   constructor() {
     super();
     this.port.onmessage = (ev: MessageEvent<ToSidWorkletMessage>) => this.handle(ev.data);
   }
 
-  private post(msg: FromSidWorkletMessage): void {
-    this.port.postMessage(msg);
+  private post(msg: FromSidWorkletMessage, transfer?: Transferable[]): void {
+    if (transfer && transfer.length > 0) {
+      this.port.postMessage(msg, transfer);
+    } else {
+      this.port.postMessage(msg);
+    }
   }
 
   private handle(msg: ToSidWorkletMessage): void {
@@ -53,6 +58,14 @@ class CawtoothSidProcessor extends AudioWorkletProcessor {
         this.chip?.reset();
         return;
       }
+      case 'subscribeChannels': {
+        this.channelsSubscribed = true;
+        return;
+      }
+      case 'unsubscribeChannels': {
+        this.channelsSubscribed = false;
+        return;
+      }
     }
   }
 
@@ -72,7 +85,14 @@ class CawtoothSidProcessor extends AudioWorkletProcessor {
     }
     const scratch = this.interleaved.subarray(0, interleavedLen);
 
-    this.chip.generate(scratch);
+    if (this.channelsSubscribed) {
+      // Fresh allocation per block so we can transfer zero-copy.
+      const channels = new Float32Array(numFrames * SID_VOICE_COUNT);
+      this.chip.generateWithChannels(scratch, channels);
+      this.post({ type: 'channels', data: channels, numFrames }, [channels.buffer]);
+    } else {
+      this.chip.generate(scratch);
+    }
 
     // SidChip duplicates its mono sample into both stereo lanes, so both
     // output channels get the same data.

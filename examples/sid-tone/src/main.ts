@@ -1,6 +1,7 @@
 import { SidPlayer, SID_CLOCK_PAL, type SidChipModel, type SidRegisterWrite } from 'cawtooth';
 import workletUrl from 'cawtooth/worklet/sid?url';
 import wasmUrl from 'cawtooth/wasm/resid.wasm?url';
+import { createOscilloscope, type Oscilloscope } from './oscilloscope.js';
 
 type Waveform = 'triangle' | 'sawtooth' | 'pulse' | 'noise';
 
@@ -50,9 +51,16 @@ const playBtn = document.getElementById('play') as HTMLButtonElement;
 const stopBtn = document.getElementById('stop') as HTMLButtonElement;
 const modelSel = document.getElementById('model') as HTMLSelectElement;
 const waveformSel = document.getElementById('waveform') as HTMLSelectElement;
+const scopeContainer = document.getElementById('scope') as HTMLElement;
+
+const scope: Oscilloscope = createOscilloscope(scopeContainer, {
+  voiceCount: 3,
+  label: (v) => `Voice ${v + 1}`,
+});
 
 let player: SidPlayer | null = null;
 let currentModel: SidChipModel | null = null;
+let unsubscribeScope: (() => void) | null = null;
 
 function setStatus(s: string): void {
   statusEl.textContent = s;
@@ -61,6 +69,8 @@ function setStatus(s: string): void {
 async function ensurePlayer(model: SidChipModel): Promise<SidPlayer> {
   if (player && currentModel === model) return player;
   if (player) {
+    unsubscribeScope?.();
+    unsubscribeScope = null;
     // Model swap needs a fresh worklet (the chip is constructed once at init).
     await player.dispose();
     player = null;
@@ -74,6 +84,8 @@ async function ensurePlayer(model: SidChipModel): Promise<SidPlayer> {
     samplingMethod: 'resample',
   });
   p.output.connect(p.audioContext.destination);
+  unsubscribeScope = p.onChannels(scope.ingest);
+  scope.start();
   player = p;
   currentModel = model;
   playBtn.disabled = false;

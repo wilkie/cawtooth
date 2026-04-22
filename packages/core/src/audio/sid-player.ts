@@ -1,4 +1,5 @@
 import { SID_CLOCK_PAL, type SidChipModel, type SidSamplingMethod } from '../chip/resid-sid.js';
+import type { ChannelsListener } from './opl-player.js';
 import { SID_PROCESSOR_NAME } from '../worklet/sid-processor-name.js';
 import type {
   FromSidWorkletMessage,
@@ -32,6 +33,8 @@ export interface SidPlayerOptions {
  * the same audio path.
  */
 export class SidPlayer {
+  private readonly channelListeners = new Set<ChannelsListener>();
+
   private constructor(
     private readonly ctx: AudioContext,
     private readonly ownsContext: boolean,
@@ -123,6 +126,27 @@ export class SidPlayer {
     this.node.port.postMessage(msg);
   }
 
+  /**
+   * Subscribe to per-voice PCM taps for scope / analysis. Returns an
+   * unsubscribe function. Channels buffer is 3 voices × numFrames,
+   * frame-interleaved ([f0_v0, f0_v1, f0_v2, f1_v0, ...]). Same shape
+   * as OplPlayer.onChannels / PsidPlayer.onChannels.
+   */
+  onChannels(listener: ChannelsListener): () => void {
+    this.channelListeners.add(listener);
+    if (this.channelListeners.size === 1) {
+      const msg: ToSidWorkletMessage = { type: 'subscribeChannels' };
+      this.node.port.postMessage(msg);
+    }
+    return () => {
+      const wasPresent = this.channelListeners.delete(listener);
+      if (wasPresent && this.channelListeners.size === 0) {
+        const msg: ToSidWorkletMessage = { type: 'unsubscribeChannels' };
+        this.node.port.postMessage(msg);
+      }
+    };
+  }
+
   async resume(): Promise<void> {
     if (this.ctx.state === 'suspended') {
       await this.ctx.resume();
@@ -130,6 +154,7 @@ export class SidPlayer {
   }
 
   async dispose(): Promise<void> {
+    this.channelListeners.clear();
     try {
       this.node.disconnect();
     } catch {
@@ -142,12 +167,21 @@ export class SidPlayer {
   }
 
   private installMessageDispatcher(): void {
-    // Replace the init-time onmessage handler (which only handled ready/
-    // error). After init we only expect late error messages; surface them.
     this.node.port.onmessage = (ev: MessageEvent<FromSidWorkletMessage>) => {
       const msg = ev.data;
-      if (msg.type === 'error') {
-        console.error('cawtooth SID worklet:', msg.message);
+      switch (msg.type) {
+        case 'channels': {
+          for (const cb of this.channelListeners) {
+            cb(msg.data, msg.numFrames);
+          }
+          return;
+        }
+        case 'error': {
+          console.error('cawtooth SID worklet:', msg.message);
+          return;
+        }
+        case 'ready':
+          return;
       }
     };
   }

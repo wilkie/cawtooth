@@ -39,11 +39,23 @@ export interface SidResetMessage {
   type: 'reset';
 }
 
+/** Begin emitting per-voice PCM taps via SidChannelsMessage once per block. */
+export interface SidSubscribeChannelsMessage {
+  type: 'subscribeChannels';
+}
+
+/** Stop emitting per-voice taps. */
+export interface SidUnsubscribeChannelsMessage {
+  type: 'unsubscribeChannels';
+}
+
 export type ToSidWorkletMessage =
   | SidInitMessage
   | SidWriteMessage
   | SidWritesMessage
-  | SidResetMessage;
+  | SidResetMessage
+  | SidSubscribeChannelsMessage
+  | SidUnsubscribeChannelsMessage;
 
 export interface SidReadyMessage {
   type: 'ready';
@@ -54,4 +66,15 @@ export interface SidErrorMessage {
   message: string;
 }
 
-export type FromSidWorkletMessage = SidReadyMessage | SidErrorMessage;
+/**
+ * Per-voice PCM block emitted once per process() call while at least one
+ * subscriber is active. `data` is 3 voices × numFrames, frame-interleaved
+ * ([f0_v0, f0_v1, f0_v2, f1_v0, ...]), transferred zero-copy.
+ */
+export interface SidChannelsMessage {
+  type: 'channels';
+  data: Float32Array;
+  numFrames: number;
+}
+
+export type FromSidWorkletMessage = SidReadyMessage | SidErrorMessage | SidChannelsMessage;

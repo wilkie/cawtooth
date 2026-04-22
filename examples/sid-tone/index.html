@@ -53,6 +53,33 @@
         padding: 0.1em 0.3em;
         border-radius: 3px;
       }
+      h2 {
+        margin-top: 2rem;
+        font-size: 1.1rem;
+      }
+      .scope-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+      }
+      .scope-voice {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .scope-voice canvas {
+        width: 100%;
+        height: 80px;
+        background: #0e1015;
+        border-radius: 3px;
+        display: block;
+      }
+      .scope-voice .voice-label {
+        font-size: 0.75rem;
+        color: #666;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        text-align: center;
+      }
     </style>
   </head>
   <body>
@@ -85,6 +112,13 @@
       <button id="stop">Stop (release)</button>
     </div>
     <div class="status" id="status">idle — click Play to initialize</div>
+
+    <h2>Per-voice oscilloscope</h2>
+    <p style="color: #666; font-size: 0.9rem; margin-top: -0.25rem">
+      Each canvas traces one of the SID's three voices. Only voice 1 is programmed by this demo;
+      voices 2 and 3 idle at zero, so their canvases stay flat.
+    </p>
+    <div class="scope-grid" id="scope"></div>
   </body>
   <script type="module" src="/src/main.ts"></script>
 </html>
