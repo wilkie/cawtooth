@@ -1,7 +1,7 @@
 import type { SidChipModel, SidSamplingMethod } from '../../chip/resid-sid.js';
 import { SID_CLOCK_PAL, SID_CLOCK_NTSC, SID_VOICE_COUNT } from '../../chip/resid-sid.js';
 import { asSidplayExports, type SidplayExports } from './sidplay-loader.js';
-import type { PsidSong } from './types.js';
+import type { PsidSidModel, PsidSong } from './types.js';
 
 const INT16_TO_FLOAT = 1 / 32768;
 const INITIAL_SCRATCH_SAMPLES = 1024;
@@ -23,6 +23,18 @@ const MODEL_CODE: Record<SidChipModel, number> = {
   MOS6581: 0,
   MOS8580: 1,
 };
+
+/**
+ * Pick a SID model for an extra chip. The PSID flag bits can be
+ * 'unknown' or 'both' — neither tells us what to instantiate, so we
+ * inherit the primary chip's model. When the flag does specify a
+ * concrete revision, honour it (multi-SID tunes sometimes intentionally
+ * mix a 6581 and an 8580).
+ */
+function pickExtraModel(flag: PsidSidModel, primary: SidChipModel): SidChipModel {
+  if (flag === 'MOS6581' || flag === 'MOS8580') return flag;
+  return primary;
+}
 
 export interface SidTuneOptions {
   /** Output sample rate in Hz. */
@@ -85,6 +97,21 @@ export class SidTune {
     );
     if (!ok) {
       throw new Error('cawtooth: failed to create sidplay runtime');
+    }
+
+    // Configure extra SIDs for v3/v4 multi-SID PSIDs. Address encoding
+    // from the HVSC spec: actualAddr = $D000 | (headerByte << 4). A
+    // zero byte means that slot is unused. Model falls back to the
+    // primary SID's model when the flags field gives no specific hint.
+    if (song.secondSIDAddress !== 0) {
+      const base2 = 0xd000 | (song.secondSIDAddress << 4);
+      const model2 = pickExtraModel(song.flags.sidModel2, this.model);
+      this.exports.cawtooth_sidplay_set_extra_sid(1, base2, MODEL_CODE[model2]);
+    }
+    if (song.thirdSIDAddress !== 0) {
+      const base3 = 0xd000 | (song.thirdSIDAddress << 4);
+      const model3 = pickExtraModel(song.flags.sidModel3, this.model);
+      this.exports.cawtooth_sidplay_set_extra_sid(2, base3, MODEL_CODE[model3]);
     }
 
     // Copy the tune's binary into emulated C64 RAM.

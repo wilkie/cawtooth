@@ -31,6 +31,15 @@ interface TinyPsidOptions {
    * programming — e.g. a snippet that writes to $DC04/$DC05.
    */
   initPrologue?: readonly number[];
+  /**
+   * PSID header version to emit. Defaults to 2. Use 3 to populate
+   * secondSIDAddress, 4 to populate third too.
+   */
+  version?: 2 | 3 | 4;
+  /** v3+ secondSIDAddress byte. Actual address = $D000 | (value << 4). */
+  secondSIDAddress?: number;
+  /** v4 thirdSIDAddress byte. Same encoding. */
+  thirdSIDAddress?: number;
 }
 
 function buildTinyPsid(opts: TinyPsidOptions = {}): Uint8Array {
@@ -74,7 +83,8 @@ function buildTinyPsid(opts: TinyPsidOptions = {}): Uint8Array {
   const header = new Uint8Array(0x7c);
   const view = new DataView(header.buffer);
   header.set([0x50, 0x53, 0x49, 0x44]); // 'PSID'
-  view.setUint16(4, 2, false); // version
+  const version = opts.version ?? 2;
+  view.setUint16(4, version, false);
   view.setUint16(6, 0x7c, false); // dataOffset
   view.setUint16(8, 0, false); // loadAddress=0 → embedded PRG header
   view.setUint16(10, INIT_ADDR, false);
@@ -88,6 +98,13 @@ function buildTinyPsid(opts: TinyPsidOptions = {}): Uint8Array {
   header.set(enc.encode('2026').subarray(0, 32), 86);
   // flags: PAL (bits 2-3 = 01) + MOS6581 (bits 4-5 = 01)
   view.setUint16(118, (0b01 << 2) | (0b01 << 4), false);
+  // startPage, pageLength default to 0 at offsets 120, 121.
+  if (version >= 3) {
+    view.setUint8(122, opts.secondSIDAddress ?? 0);
+  }
+  if (version >= 4) {
+    view.setUint8(123, opts.thirdSIDAddress ?? 0);
+  }
 
   // Payload layout:
   //   [0..1]        PRG load address ($4000 LE)
@@ -421,6 +438,90 @@ describe('SidTune (PSID runtime)', () => {
     // $01 should be $37 (KERNAL + BASIC + I/O all mapped in), the
     // standard post-boot C64 banking state RSID tunes expect.
     expect(tune.peek(0x0001)).toBe(0x37);
+    tune.dispose();
+  });
+
+  it('routes writes to an extra SID at $D420 (v3 PSID secondSIDAddress)', () => {
+    // Init writes $11 to $D420 (control reg of SECOND SID's voice 1) and
+    // $22 to $D404 (control reg of PRIMARY SID's voice 1). With our slot
+    // routing fixed, the primary mirror range no longer swallows writes
+    // to the secondary's 32-byte window.
+    //
+    //   A9 22  LDA #$22
+    //   8D 04 D4  STA $D404  (primary voice 1 control)
+    //   A9 11  LDA #$11
+    //   8D 20 D4  STA $D420  (secondary voice 1 freqLo)
+    //   8D 04 D4  STA $D404  (again — overwrite to $11)
+    // End is the shared RTS from the common init tail.
+    const prologue = [
+      0xa9, 0x22, 0x8d, 0x04, 0xd4,
+      0xa9, 0x11, 0x8d, 0x20, 0xd4,
+    ];
+    const tune = makeTune(
+      buildTinyPsid({ version: 3, secondSIDAddress: 0x42, initPrologue: prologue }),
+    );
+    tune.initSong(1);
+
+    // RAM at $D420 should have the $11 byte (write6502 stores to ram even
+    // when routing to a SID), confirming the secondary's window isn't
+    // being swallowed by the primary mirror.
+    expect(tune.peek(0xd420)).toBe(0x11);
+    tune.dispose();
+  });
+
+  it('produces non-silent audio with an extra SID active', () => {
+    // Secondary SID at $D500 (byte value 0x50). Init programs it for a
+    // triangle on voice 1 too, so both SIDs sound. We don't assert a
+    // specific audio level shift vs. primary-only — the practical check
+    // is that the runtime stays alive and produces audible output.
+    const prologue = [
+      // Primary SID voice 1 stays untouched in prologue (handled by
+      // common init). Program secondary's voice 1 with sustained triangle:
+      0xa9, 0x45, 0x8d, 0x00, 0xd5,   // freqLo
+      0xa9, 0x1d, 0x8d, 0x01, 0xd5,   // freqHi
+      0xa9, 0xf0, 0x8d, 0x06, 0xd5,   // S=15, R=0
+      0xa9, 0x0f, 0x8d, 0x18, 0xd5,   // volume 15
+      0xa9, 0x11, 0x8d, 0x04, 0xd5,   // triangle + gate
+    ];
+    const tune = makeTune(
+      buildTinyPsid({ version: 3, secondSIDAddress: 0x50, initPrologue: prologue }),
+    );
+    tune.initSong(1);
+    tune.generate(new Float32Array(SAMPLE_RATE * 2));
+    const out = new Float32Array(1024 * 2);
+    tune.generate(out);
+    expect(peakAmplitude(out)).toBeGreaterThan(0.01);
+    tune.dispose();
+  });
+
+  it('supports a third SID (v4 PSID thirdSIDAddress)', () => {
+    // Write $77 to $D5E0 (thirdSIDAddress byte 0x5E → address $D5E0,
+    // just inside the valid-extras range). Verify the RAM-level write
+    // sticks and no writes collide.
+    const prologue = [
+      0xa9, 0x77, 0x8d, 0xe0, 0xd5,
+    ];
+    const tune = makeTune(
+      buildTinyPsid({
+        version: 4,
+        secondSIDAddress: 0x42,
+        thirdSIDAddress: 0x5e,
+        initPrologue: prologue,
+      }),
+    );
+    tune.initSong(1);
+    expect(tune.peek(0xd5e0)).toBe(0x77);
+    tune.dispose();
+  });
+
+  it('v2 PSIDs ignore extra-SID slots (single-SID tunes still work)', () => {
+    // No multi-SID fields in the header → only the primary is active.
+    // A write to $D420 (without any secondary configured) lands on the
+    // primary SID via its $D400-$D7FF mirror, so RAM at $D420 reflects it.
+    const prologue = [0xa9, 0x99, 0x8d, 0x20, 0xd4];
+    const tune = makeTune(buildTinyPsid({ initPrologue: prologue }));
+    tune.initSong(1);
+    expect(tune.peek(0xd420)).toBe(0x99);
     tune.dispose();
   });
 

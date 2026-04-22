@@ -134,6 +134,7 @@ ls -lh "$WASM_DIR/resid.wasm"
 SIDPLAY_EXPORTS='[
   "_cawtooth_sidplay_create",
   "_cawtooth_sidplay_destroy",
+  "_cawtooth_sidplay_set_extra_sid",
   "_cawtooth_sidplay_load",
   "_cawtooth_sidplay_init",
   "_cawtooth_sidplay_get_play_interval",

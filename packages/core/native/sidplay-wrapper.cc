@@ -42,7 +42,27 @@ namespace {
 // self-contained. We model the whole address space as plain RAM plus a
 // SID-register trap.
 static uint8_t ram[65536];
-static SID* sid = nullptr;
+
+// Up to 3 SID chips per v3/v4 PSID spec. Index 0 is the primary at
+// $D400 (always present); 1 and 2 are optional extras at whatever
+// address the tune's secondSIDAddress / thirdSIDAddress header bytes
+// decode to. A zero base_addr means the slot is inactive.
+static const int MAX_SIDS = 3;
+static SID* sids[MAX_SIDS] = { nullptr, nullptr, nullptr };
+static uint32_t sid_base[MAX_SIDS] = { 0xd400, 0, 0 };
+
+// Parameters cached from create() so lazy-allocation of extra SIDs can
+// mirror the primary's clock/sample/method without the caller needing
+// to re-pass them.
+static double chip_clock_freq = 985248.0;
+static double chip_sample_freq = 44100.0;
+static int chip_sampling_method = 2;  // SAMPLE_RESAMPLE
+
+// Per-sample scratch for mixing extra SIDs into the primary's output
+// buffer. 2048 caps us at whatever batch size a single generate() loop
+// iteration asks for — comfortably above the ~880 samples a PAL vblank
+// produces at 44.1 kHz.
+static int16_t mix_scratch[2048];
 
 // Cached between init() and generate() so the caller doesn't have to pass
 // them every frame.
@@ -77,24 +97,47 @@ static const uint16_t RETURN_SENTINEL = 0x0001;
 // fake6502 bus callbacks.
 // ----------------------------------------------------------------------------
 
+// Return the SID slot covering `address`, or -1 if none.
+//
+// Each SID exposes a 32-byte register window. The primary SID at $D400
+// is widely mirrored throughout $D400-$D7FF on real hardware (every
+// $20 bytes), which lots of tunes poke into; we honor that by matching
+// any address in $D400-$D7FF against slot 0.
+//
+// Extras are checked FIRST on their strict 32-byte window, so a tune
+// whose second SID sits inside $D400-$D7FF (e.g. secondSIDAddress=$42
+// → $D420) has its writes routed to the secondary instead of being
+// swallowed by the primary's mirror range.
+static int find_sid_slot(uint16_t address) {
+    for (int i = 1; i < MAX_SIDS; i++) {
+        if (sid_base[i] != 0 && sids[i] && (address & ~0x1fu) == sid_base[i]) {
+            return i;
+        }
+    }
+    if ((address & 0xfc00) == 0xd400 && sids[0]) {
+        return 0;
+    }
+    return -1;
+}
+
 extern "C" uint8_t read6502(uint16_t address) {
-    // First SID lives at $D400 and mirrors at 32-byte intervals throughout
-    // $D400-$D7FF. Real hardware mirrors across the whole $D400-$D7FF block.
-    if ((address & 0xfc00) == 0xd400 && sid) {
-        return (uint8_t)sid->read(address & 0x1f);
+    int slot = find_sid_slot(address);
+    if (slot >= 0) {
+        return (uint8_t)sids[slot]->read(address & 0x1f);
     }
     return ram[address];
 }
 
 extern "C" void write6502(uint16_t address, uint8_t value) {
     ram[address] = value;
-    if ((address & 0xfc00) == 0xd400 && sid) {
-        sid->write(address & 0x1f, value);
+    int slot = find_sid_slot(address);
+    if (slot >= 0) {
+        sids[slot]->write(address & 0x1f, value);
         // Match SidChip's behavior: 1-cycle advance after every SID write
         // so 8580+SAMPLE_FAST's pipelined writes don't clobber each other.
         // On other modes the tick is a no-op of negligible cost.
         cycle_count one = 1;
-        sid->clock(one);
+        sids[slot]->clock(one);
     }
 }
 
@@ -170,14 +213,25 @@ static int32_t run_irq_handler(uint16_t entry, int32_t max_cycles) {
 CAWTOOTH_EXPORT uint32_t cawtooth_sidplay_create(
     double clock_hz, double sample_hz, uint32_t model, uint32_t method
 ) {
-    if (sid) {
-        delete sid;
-        sid = nullptr;
+    // Tear down any existing SID instances, including extras, so a
+    // recreate starts from a clean slate.
+    for (int i = 0; i < MAX_SIDS; i++) {
+        if (sids[i]) {
+            delete sids[i];
+            sids[i] = nullptr;
+        }
+        sid_base[i] = (i == 0) ? 0xd400 : 0;
     }
-    sid = new SID();
-    sid->set_chip_model(model == 1 ? reSID::MOS8580 : reSID::MOS6581);
-    sid->set_sampling_parameters(clock_hz, (sampling_method)method, sample_hz);
-    sid->reset();
+
+    chip_clock_freq = clock_hz;
+    chip_sample_freq = sample_hz;
+    chip_sampling_method = (int)method;
+
+    sids[0] = new SID();
+    sids[0]->set_chip_model(model == 1 ? reSID::MOS8580 : reSID::MOS6581);
+    sids[0]->set_sampling_parameters(clock_hz, (sampling_method)method, sample_hz);
+    sids[0]->reset();
+
     memset(ram, 0, sizeof(ram));
     cycles_until_next_play = 0;
     cycles_per_play_frame = 19656;
@@ -187,10 +241,49 @@ CAWTOOTH_EXPORT uint32_t cawtooth_sidplay_create(
 }
 
 CAWTOOTH_EXPORT void cawtooth_sidplay_destroy(void) {
-    if (sid) {
-        delete sid;
-        sid = nullptr;
+    for (int i = 0; i < MAX_SIDS; i++) {
+        if (sids[i]) {
+            delete sids[i];
+            sids[i] = nullptr;
+        }
+        sid_base[i] = 0;
     }
+    sid_base[0] = 0xd400; // retain the convention even when empty
+}
+
+/**
+ * Configure an extra SID chip (slot 1 or 2) living at `base_addr`.
+ * Pass base_addr=0 to disable/tear down the slot. Uses the same clock,
+ * sample rate, and sampling method as the primary SID so a multi-SID
+ * tune sounds internally consistent. model is 0 (MOS6581) or 1 (MOS8580).
+ *
+ * Call this AFTER cawtooth_sidplay_create and BEFORE cawtooth_sidplay_init
+ * so the init routine's register writes are routed correctly.
+ */
+CAWTOOTH_EXPORT void cawtooth_sidplay_set_extra_sid(
+    uint32_t index, uint32_t base_addr, uint32_t model
+) {
+    if (index < 1 || index >= (uint32_t)MAX_SIDS) return;
+
+    if (base_addr == 0) {
+        // Disable this slot.
+        if (sids[index]) {
+            delete sids[index];
+            sids[index] = nullptr;
+        }
+        sid_base[index] = 0;
+        return;
+    }
+
+    if (!sids[index]) {
+        sids[index] = new SID();
+        sids[index]->set_sampling_parameters(
+            chip_clock_freq, (sampling_method)chip_sampling_method, chip_sample_freq
+        );
+    }
+    sids[index]->set_chip_model(model == 1 ? reSID::MOS8580 : reSID::MOS6581);
+    sids[index]->reset();
+    sid_base[index] = base_addr;
 }
 
 /**
@@ -251,10 +344,12 @@ CAWTOOTH_EXPORT int32_t cawtooth_sidplay_init(
     uint32_t use_cia_timer,
     uint32_t is_rsid
 ) {
-    // Reset the SID so subsong changes start from a clean register state.
-    // libsidplayfp does the same between subsongs; tunes commonly assume
-    // power-on SID state in their init routine.
-    if (sid) sid->reset();
+    // Reset all active SIDs so subsong changes start from a clean register
+    // state. libsidplayfp does the same between subsongs; tunes commonly
+    // assume power-on SID state in their init routine.
+    for (int i = 0; i < MAX_SIDS; i++) {
+        if (sids[i]) sids[i]->reset();
+    }
 
     int32_t fallback = cycles_per_frame_vblank > 0 ? cycles_per_frame_vblank : 19656;
     rsid_mode = is_rsid != 0;
@@ -335,13 +430,27 @@ CAWTOOTH_EXPORT int32_t cawtooth_sidplay_get_play_interval(void) {
     return cycles_per_play_frame;
 }
 
+// Sum int16 samples from `src` into `dst` with saturation. Used to fold
+// extra SID outputs into the primary SID's buffer.
+static inline void sum_saturate(int16_t* dst, const int16_t* src, uint32_t n) {
+    for (uint32_t i = 0; i < n; i++) {
+        int32_t s = (int32_t)dst[i] + (int32_t)src[i];
+        if (s > 32767) s = 32767;
+        else if (s < -32768) s = -32768;
+        dst[i] = (int16_t)s;
+    }
+}
+
 /**
  * Fill `buf` with `num_samples` mono int16 frames of audio. Internally
  * calls the tune's play routine each time the per-frame cycle budget
- * expires, then clocks the SID for the remaining cycles producing samples.
+ * expires, then clocks each active SID for the remaining cycles and
+ * sums the outputs into `buf`. Mixing uses saturating addition — two
+ * or three SIDs at high levels will clip, matching what a real C64
+ * playing a multi-SID tune through parallel chips would do.
  */
 CAWTOOTH_EXPORT void cawtooth_sidplay_generate(int16_t* buf, uint32_t num_samples) {
-    if (!sid || num_samples == 0) return;
+    if (!sids[0] || num_samples == 0) return;
 
     uint32_t written = 0;
     while (written < num_samples) {
@@ -357,12 +466,38 @@ CAWTOOTH_EXPORT void cawtooth_sidplay_generate(int16_t* buf, uint32_t num_sample
             cycles_until_next_play += cycles_per_play_frame;
         }
 
-        cycle_count dt = cycles_until_next_play;
+        cycle_count dt_orig = cycles_until_next_play;
         uint32_t remaining = num_samples - written;
-        int produced = sid->clock(dt, buf + written, (int)remaining);
+
+        // Primary SID: produce directly into buf.
+        cycle_count dt0 = dt_orig;
+        int produced = sids[0]->clock(dt0, buf + written, (int)remaining);
+
+        // Extra SIDs: produce into scratch, saturate-sum into buf.
+        for (int i = 1; i < MAX_SIDS; i++) {
+            if (sid_base[i] != 0 && sids[i] && produced > 0) {
+                int slot_remaining = produced;
+                int slot_written = 0;
+                while (slot_written < slot_remaining) {
+                    int chunk = slot_remaining - slot_written;
+                    int cap = (int)(sizeof(mix_scratch) / sizeof(mix_scratch[0]));
+                    if (chunk > cap) chunk = cap;
+                    cycle_count dti = dt_orig;
+                    int produced_i = sids[i]->clock(dti, mix_scratch, chunk);
+                    if (produced_i <= 0) break;
+                    sum_saturate(
+                        buf + written + slot_written,
+                        mix_scratch,
+                        (uint32_t)produced_i
+                    );
+                    slot_written += produced_i;
+                }
+            }
+        }
+
         written += (uint32_t)produced;
 
-        int32_t new_remaining = (int32_t)dt;
+        int32_t new_remaining = (int32_t)dt0;
         // Safety: if the SID neither produced a sample nor consumed any
         // cycles, we'd loop forever. Force a small advance.
         if (produced == 0 && new_remaining == cycles_until_next_play) {
@@ -382,11 +517,17 @@ CAWTOOTH_EXPORT void cawtooth_sidplay_generate(int16_t* buf, uint32_t num_sample
  * voice output → int16 via >>5). This is slightly more overhead than
  * the bulk generate path; consumers that don't need scope output should
  * keep using `cawtooth_sidplay_generate`.
+ *
+ * Multi-SID note: the channel buffer only reflects the PRIMARY SID's
+ * three voices. Extra SIDs are mixed into `stereo_buf` but don't get
+ * per-voice taps. Rescaling the UI to handle 6- or 9-voice scopes is a
+ * future extension; primary-SID-only keeps the interface stable and
+ * covers the common case.
  */
 CAWTOOTH_EXPORT void cawtooth_sidplay_generate_channels(
     int16_t* stereo_buf, int16_t* channels_buf, uint32_t num_samples
 ) {
-    if (!sid || num_samples == 0) return;
+    if (!sids[0] || num_samples == 0) return;
 
     uint32_t written = 0;
     while (written < num_samples) {
@@ -402,22 +543,36 @@ CAWTOOTH_EXPORT void cawtooth_sidplay_generate_channels(
             cycles_until_next_play += cycles_per_play_frame;
         }
 
-        cycle_count dt = cycles_until_next_play;
-        int16_t sample = 0;
-        int produced = sid->clock(dt, &sample, 1);
-        int32_t new_remaining = (int32_t)dt;
-        // Safety: if the SID consumed all cycles without producing a
-        // sample, let the loop tick over to fire play on next iteration.
+        cycle_count dt_orig = cycles_until_next_play;
+        cycle_count dt0 = dt_orig;
+        int16_t primary_sample = 0;
+        int produced = sids[0]->clock(dt0, &primary_sample, 1);
+        int32_t new_remaining = (int32_t)dt0;
         if (produced == 0 && new_remaining == cycles_until_next_play) {
             new_remaining = 0;
         }
         cycles_until_next_play = new_remaining;
 
         if (produced > 0) {
-            stereo_buf[written] = sample;
-            channels_buf[written * 3 + 0] = (int16_t)(sid->voice_output(0) >> 5);
-            channels_buf[written * 3 + 1] = (int16_t)(sid->voice_output(1) >> 5);
-            channels_buf[written * 3 + 2] = (int16_t)(sid->voice_output(2) >> 5);
+            // Sum extra SIDs into the stereo sample (same saturating mix
+            // as the bulk generate path).
+            int32_t mix = (int32_t)primary_sample;
+            for (int i = 1; i < MAX_SIDS; i++) {
+                if (sid_base[i] != 0 && sids[i]) {
+                    cycle_count dti = dt_orig;
+                    int16_t s = 0;
+                    int prod_i = sids[i]->clock(dti, &s, 1);
+                    if (prod_i > 0) mix += s;
+                }
+            }
+            if (mix > 32767) mix = 32767;
+            else if (mix < -32768) mix = -32768;
+            stereo_buf[written] = (int16_t)mix;
+
+            // Per-voice taps: primary SID only.
+            channels_buf[written * 3 + 0] = (int16_t)(sids[0]->voice_output(0) >> 5);
+            channels_buf[written * 3 + 1] = (int16_t)(sids[0]->voice_output(1) >> 5);
+            channels_buf[written * 3 + 2] = (int16_t)(sids[0]->voice_output(2) >> 5);
             written++;
         }
     }
@@ -432,7 +587,9 @@ CAWTOOTH_EXPORT uint8_t cawtooth_sidplay_peek(uint16_t address) {
     return ram[address];
 }
 
-/** Reset just the SID chip; leaves CPU state and RAM untouched. */
+/** Reset all active SID chips; leaves CPU state and RAM untouched. */
 CAWTOOTH_EXPORT void cawtooth_sidplay_reset_sid(void) {
-    if (sid) sid->reset();
+    for (int i = 0; i < MAX_SIDS; i++) {
+        if (sids[i]) sids[i]->reset();
+    }
 }
