@@ -1,5 +1,4 @@
-import { SID_VOICE_COUNT } from '../chip/resid-sid.js';
-import { SidTune } from '../formats/psid/runtime.js';
+import { PSID_MAX_VOICE_COUNT, SidTune } from '../formats/psid/runtime.js';
 import { createSidplayImports } from '../formats/psid/sidplay-loader.js';
 import type {
   FromPsidWorkletMessage,
@@ -120,7 +119,7 @@ class CawtoothPsidProcessor extends AudioWorkletProcessor {
       // Fresh allocation per block so we can transfer with zero-copy.
       // Ownership passes on post; we never touch this buffer again on
       // the worklet side.
-      const channels = new Float32Array(numFrames * SID_VOICE_COUNT);
+      const channels = new Float32Array(numFrames * PSID_MAX_VOICE_COUNT);
       this.tune.generateWithChannels(scratch, channels);
       this.post({ type: 'channels', data: channels, numFrames }, [channels.buffer]);
     } else {

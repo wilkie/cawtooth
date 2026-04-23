@@ -1,10 +1,17 @@
 import type { SidChipModel, SidSamplingMethod } from '../../chip/resid-sid.js';
-import { SID_CLOCK_PAL, SID_CLOCK_NTSC, SID_VOICE_COUNT } from '../../chip/resid-sid.js';
+import { SID_CLOCK_PAL, SID_CLOCK_NTSC } from '../../chip/resid-sid.js';
 import { asSidplayExports, type SidplayExports } from './sidplay-loader.js';
 import type { PsidSidModel, PsidSong } from './types.js';
 
 const INT16_TO_FLOAT = 1 / 32768;
 const INITIAL_SCRATCH_SAMPLES = 1024;
+
+/**
+ * Maximum PSID voice slots the channel buffer carries. Three voices ×
+ * three SID chip slots per the v4 PSID spec. The wasm always fills
+ * this full stride, zero-padding inactive SID slots.
+ */
+export const PSID_MAX_VOICE_COUNT = 9;
 
 /** Nominal PAL C64 cycles-per-vblank (50.124 Hz). */
 export const PAL_CYCLES_PER_FRAME = 19656;
@@ -129,7 +136,9 @@ export class SidTune {
 
     this.scratchSamples = INITIAL_SCRATCH_SAMPLES;
     this.scratchPtr = this.exports.malloc(this.scratchSamples * 2);
-    this.channelsScratchPtr = this.exports.malloc(this.scratchSamples * SID_VOICE_COUNT * 2);
+    this.channelsScratchPtr = this.exports.malloc(
+      this.scratchSamples * PSID_MAX_VOICE_COUNT * 2,
+    );
     if (!this.scratchPtr || !this.channelsScratchPtr) {
       this.exports.cawtooth_sidplay_destroy();
       throw new Error('cawtooth: failed to allocate sample scratch');
@@ -206,19 +215,25 @@ export class SidTune {
 
   /**
    * Fill both a stereo output buffer AND a per-voice buffer in one pass.
-   * `channelsOutput` length must be `numFrames * 3` (3 SID voices); layout
-   * is frame-interleaved: `[f0_v0, f0_v1, f0_v2, f1_v0, ...]`. Values are
-   * scaled Float32 in roughly [-1, 1] (the wasm wrapper scales 20-bit
-   * reSID voice output into int16 via >>5; tune-level mixes will
-   * typically peak well below ±1 per voice).
+   *
+   * `channelsOutput` length must be `numFrames * PSID_MAX_VOICE_COUNT`
+   * (9 voices: 3 per SID slot × 3 slots). Layout is frame-interleaved:
+   * `[f0_sid1_v1, f0_sid1_v2, f0_sid1_v3, f0_sid2_v1, ..., f0_sid3_v3,
+   *   f1_sid1_v1, ...]`. For single- and dual-SID tunes the unused SID
+   * slots are zero-filled, so the caller can read a stable stride of 9
+   * without having to check active-chip state per frame.
+   *
+   * Values are scaled Float32 in roughly [-1, 1]; see the resid-wrapper
+   * comment for the 20-bit voice output → int16 scaling rationale.
    */
   generateWithChannels(stereoOutput: Float32Array, channelsOutput: Float32Array): void {
     const numFrames = stereoOutput.length >>> 1;
     if (numFrames === 0) return;
-    if (channelsOutput.length < numFrames * SID_VOICE_COUNT) {
+    const required = numFrames * PSID_MAX_VOICE_COUNT;
+    if (channelsOutput.length < required) {
       throw new Error(
-        `cawtooth: channelsOutput must hold numFrames * ${SID_VOICE_COUNT} samples ` +
-          `(got ${channelsOutput.length}, need ${numFrames * SID_VOICE_COUNT})`,
+        `cawtooth: channelsOutput must hold numFrames * ${PSID_MAX_VOICE_COUNT} samples ` +
+          `(got ${channelsOutput.length}, need ${required})`,
       );
     }
 
@@ -237,8 +252,8 @@ export class SidTune {
       stereoOutput[i * 2 + 1] = s;
     }
 
-    const chView = new Int16Array(mem, this.channelsScratchPtr, numFrames * SID_VOICE_COUNT);
-    for (let i = 0; i < chView.length; i++) {
+    const chView = new Int16Array(mem, this.channelsScratchPtr, required);
+    for (let i = 0; i < required; i++) {
       channelsOutput[i] = chView[i] * INT16_TO_FLOAT;
     }
   }
@@ -281,7 +296,9 @@ export class SidTune {
     this.exports.free(this.channelsScratchPtr);
     this.scratchSamples = numSamples;
     this.scratchPtr = this.exports.malloc(numSamples * 2);
-    this.channelsScratchPtr = this.exports.malloc(numSamples * SID_VOICE_COUNT * 2);
+    this.channelsScratchPtr = this.exports.malloc(
+      numSamples * PSID_MAX_VOICE_COUNT * 2,
+    );
     if (!this.scratchPtr || !this.channelsScratchPtr) {
       throw new Error('cawtooth: failed to grow sample scratch');
     }

@@ -509,25 +509,31 @@ CAWTOOTH_EXPORT void cawtooth_sidplay_generate(int16_t* buf, uint32_t num_sample
 
 /**
  * Same as `cawtooth_sidplay_generate` but also fills a per-voice tap
- * buffer (3 voices × num_samples, frame-interleaved: [f0_v0..v2, f1_v0..v2, ...]).
+ * buffer for oscilloscope use.
+ *
+ * Channels buffer layout is frame-interleaved with ALWAYS 9 voices
+ * (3 voices × MAX_SIDS slots), even on single-SID tunes:
+ *   [f0_SID1_V1, f0_SID1_V2, f0_SID1_V3,
+ *    f0_SID2_V1, f0_SID2_V2, f0_SID2_V3,
+ *    f0_SID3_V1, f0_SID3_V2, f0_SID3_V3,
+ *    f1_SID1_V1, ...]
+ *
+ * Inactive SID slots are zero-filled so the caller can read a stable
+ * stride of 9. The single-SID bandwidth cost is a handful of extra
+ * Float32s per audio block — negligible.
  *
  * Runs the play-routine / resampler loop one output sample at a time so
- * we can snapshot each voice's output at the right moment. See the
- * matching comment in resid-wrapper.cc for the voice-tap scaling (20-bit
- * voice output → int16 via >>5). This is slightly more overhead than
- * the bulk generate path; consumers that don't need scope output should
- * keep using `cawtooth_sidplay_generate`.
- *
- * Multi-SID note: the channel buffer only reflects the PRIMARY SID's
- * three voices. Extra SIDs are mixed into `stereo_buf` but don't get
- * per-voice taps. Rescaling the UI to handle 6- or 9-voice scopes is a
- * future extension; primary-SID-only keeps the interface stable and
- * covers the common case.
+ * each voice's output is snapshotted at the exact moment its stereo
+ * sample is emitted. See the matching comment in resid-wrapper.cc for
+ * the voice-tap scaling (20-bit voice output → int16 via >>5).
  */
 CAWTOOTH_EXPORT void cawtooth_sidplay_generate_channels(
     int16_t* stereo_buf, int16_t* channels_buf, uint32_t num_samples
 ) {
     if (!sids[0] || num_samples == 0) return;
+
+    const int VOICES_PER_SID = 3;
+    const int STRIDE = VOICES_PER_SID * MAX_SIDS;
 
     uint32_t written = 0;
     while (written < num_samples) {
@@ -555,7 +561,9 @@ CAWTOOTH_EXPORT void cawtooth_sidplay_generate_channels(
 
         if (produced > 0) {
             // Sum extra SIDs into the stereo sample (same saturating mix
-            // as the bulk generate path).
+            // as the bulk generate path). Each extra SID is advanced
+            // by the same dt_orig so its voice_output() snapshots align
+            // with the primary's output sample.
             int32_t mix = (int32_t)primary_sample;
             for (int i = 1; i < MAX_SIDS; i++) {
                 if (sid_base[i] != 0 && sids[i]) {
@@ -569,10 +577,19 @@ CAWTOOTH_EXPORT void cawtooth_sidplay_generate_channels(
             else if (mix < -32768) mix = -32768;
             stereo_buf[written] = (int16_t)mix;
 
-            // Per-voice taps: primary SID only.
-            channels_buf[written * 3 + 0] = (int16_t)(sids[0]->voice_output(0) >> 5);
-            channels_buf[written * 3 + 1] = (int16_t)(sids[0]->voice_output(1) >> 5);
-            channels_buf[written * 3 + 2] = (int16_t)(sids[0]->voice_output(2) >> 5);
+            // Per-voice taps for all slots; inactive slots are zero.
+            int16_t* cb = channels_buf + written * STRIDE;
+            for (int s = 0; s < MAX_SIDS; s++) {
+                if (sid_base[s] != 0 && sids[s]) {
+                    cb[s * VOICES_PER_SID + 0] = (int16_t)(sids[s]->voice_output(0) >> 5);
+                    cb[s * VOICES_PER_SID + 1] = (int16_t)(sids[s]->voice_output(1) >> 5);
+                    cb[s * VOICES_PER_SID + 2] = (int16_t)(sids[s]->voice_output(2) >> 5);
+                } else {
+                    cb[s * VOICES_PER_SID + 0] = 0;
+                    cb[s * VOICES_PER_SID + 1] = 0;
+                    cb[s * VOICES_PER_SID + 2] = 0;
+                }
+            }
             written++;
         }
     }

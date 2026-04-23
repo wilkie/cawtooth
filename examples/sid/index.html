@@ -155,9 +155,10 @@
 
     <h2>Per-voice oscilloscope</h2>
     <p style="color: #666; font-size: 0.9rem; margin-top: -0.25rem">
-      Each canvas shows one of the SID's three voices directly from reSID, sampled at the output
-      rate. Amplitude is auto-scaled per voice so a single gated note fills the canvas even though
-      its raw level is well below the chip's peak mix level.
+      Each canvas shows one SID voice directly from reSID, sampled at the output rate. Single-SID
+      tunes show three canvases; v3/v4 PSIDs that use multiple SID chips show up to nine (one row
+      per chip). Amplitude is auto-scaled per voice so a single gated note fills its canvas even
+      though its raw level is well below the chip's mix peak.
     </p>
     <div class="scope-grid" id="scope"></div>
   </body>

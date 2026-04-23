@@ -37,10 +37,32 @@ const downloadLengthSel = document.getElementById('download-length') as HTMLSele
 const songlengthsFile = document.getElementById('songlengths-file') as HTMLInputElement;
 const songlengthsStatus = document.getElementById('songlengths-status') as HTMLElement;
 
-const scope: Oscilloscope = createOscilloscope(scopeContainer, {
-  voiceCount: 3,
-  label: (v) => `Voice ${v + 1}`,
-});
+function labelForVoice(voiceIdx: number, sidCount: number): string {
+  // For single-SID tunes label the three canvases as V1/V2/V3. For
+  // multi-SID, prefix with the SID chip number so it's clear which
+  // chip a voice belongs to.
+  const voiceInSid = (voiceIdx % 3) + 1;
+  if (sidCount <= 1) return `Voice ${voiceInSid}`;
+  const sidIdx = Math.floor(voiceIdx / 3) + 1;
+  return `SID ${sidIdx} · V${voiceInSid}`;
+}
+
+/**
+ * (Re)create the scope for the given active-SID count. Creating
+ * with exactly `3 * sidCount` voice canvases matches what a multi-SID
+ * tune actually uses — the worklet still emits a stride-9 stream but
+ * the scope renders only the first `3 * sidCount` slots, inferring the
+ * stride from the incoming buffer length.
+ */
+function buildScope(sidCount: number): Oscilloscope {
+  const voiceCount = Math.max(3, Math.min(9, 3 * sidCount));
+  return createOscilloscope(scopeContainer, {
+    voiceCount,
+    label: (v) => labelForVoice(v, sidCount),
+  });
+}
+
+let scope: Oscilloscope = buildScope(1);
 
 let player: PsidPlayer | null = null;
 let unsubscribeScope: (() => void) | null = null;
@@ -165,6 +187,16 @@ playBtn.addEventListener('click', async () => {
     });
     player.output.connect(player.audioContext.destination);
     await player.resumeAudio();
+
+    // Rebuild the scope to match this tune's active-SID count (1, 2, or
+    // 3). The worklet always emits a stride-9 per-voice buffer; the
+    // scope takes a subset.
+    const sidCount =
+      1 +
+      (currentSong.secondSIDAddress !== 0 ? 1 : 0) +
+      (currentSong.thirdSIDAddress !== 0 ? 1 : 0);
+    scope.dispose();
+    scope = buildScope(sidCount);
 
     // Subscribe the scope to per-voice PCM taps for as long as this
     // player is alive.

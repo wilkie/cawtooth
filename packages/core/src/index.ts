@@ -118,6 +118,7 @@ export {
   SidTune,
   PAL_CYCLES_PER_FRAME,
   NTSC_CYCLES_PER_FRAME,
+  PSID_MAX_VOICE_COUNT,
 } from './formats/psid/runtime.js';
 export type { SidTuneOptions } from './formats/psid/runtime.js';
 export {

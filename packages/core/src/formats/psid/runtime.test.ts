@@ -292,40 +292,78 @@ describe('SidTune (PSID runtime)', () => {
     tune.dispose();
   });
 
-  it('generateWithChannels fills stereo + 3-voice buffers', () => {
+  it('generateWithChannels fills stereo + 9-voice buffers with inactive SID slots zeroed', () => {
     const tune = makeTune(buildTinyPsid());
     tune.initSong(1);
     // Warm up through the external filter.
     tune.generate(new Float32Array(SAMPLE_RATE * 2));
 
     const stereo = new Float32Array(1024 * 2);
-    const channels = new Float32Array(1024 * 3);
+    const channels = new Float32Array(1024 * 9);
     tune.generateWithChannels(stereo, channels);
 
     expect(peakAmplitude(stereo)).toBeGreaterThan(0.01);
-    // Only voice 1 is programmed; voices 2 and 3 should be silent.
-    let v0Peak = 0;
-    let v1Peak = 0;
-    let v2Peak = 0;
+    // Only primary voice 1 is programmed. Voices 2-3 of SID 1, and every
+    // voice of the inactive SIDs 2 and 3, should be silent (zero).
+    const peaks = new Array<number>(9).fill(0);
     for (let f = 0; f < 1024; f++) {
-      const a = Math.abs(channels[f * 3 + 0]);
-      const b = Math.abs(channels[f * 3 + 1]);
-      const c = Math.abs(channels[f * 3 + 2]);
-      if (a > v0Peak) v0Peak = a;
-      if (b > v1Peak) v1Peak = b;
-      if (c > v2Peak) v2Peak = c;
+      for (let v = 0; v < 9; v++) {
+        const a = Math.abs(channels[f * 9 + v]);
+        if (a > peaks[v]) peaks[v] = a;
+      }
     }
-    expect(v0Peak).toBeGreaterThan(0.005);
-    expect(v1Peak).toBeLessThan(0.01);
-    expect(v2Peak).toBeLessThan(0.01);
+    expect(peaks[0]).toBeGreaterThan(0.005);
+    for (let v = 1; v < 9; v++) {
+      expect(peaks[v]).toBeLessThan(0.01);
+    }
     tune.dispose();
   });
 
   it('generateWithChannels rejects undersized channel buffers', () => {
     const tune = makeTune(buildTinyPsid());
     const stereo = new Float32Array(64 * 2);
-    const channels = new Float32Array(64); // need 64 * 3
+    // Only 3-voice worth of space; need 64 * 9.
+    const channels = new Float32Array(64 * 3);
     expect(() => tune.generateWithChannels(stereo, channels)).toThrow(/channelsOutput/);
+    tune.dispose();
+  });
+
+  it('generateWithChannels taps an active secondary SID at $D420', () => {
+    // Program voice 1 of the SECONDARY SID with a sustained triangle.
+    // Primary SID also gets its default voice-1 triangle from the shared
+    // init tail, so slots [0..2] AND [3..5] should be active.
+    const prologue = [
+      0xa9, 0x45, 0x8d, 0x20, 0xd4,   // freqLo secondary voice 1
+      0xa9, 0x1d, 0x8d, 0x21, 0xd4,   // freqHi
+      0xa9, 0xf0, 0x8d, 0x26, 0xd4,   // SR = sustain 15
+      0xa9, 0x0f, 0x8d, 0x38, 0xd4,   // secondary master volume
+      0xa9, 0x11, 0x8d, 0x24, 0xd4,   // triangle + gate
+    ];
+    const tune = makeTune(
+      buildTinyPsid({ version: 3, secondSIDAddress: 0x42, initPrologue: prologue }),
+    );
+    tune.initSong(1);
+    tune.generate(new Float32Array(SAMPLE_RATE * 2));
+
+    const stereo = new Float32Array(1024 * 2);
+    const channels = new Float32Array(1024 * 9);
+    tune.generateWithChannels(stereo, channels);
+
+    const peaks = new Array<number>(9).fill(0);
+    for (let f = 0; f < 1024; f++) {
+      for (let v = 0; v < 9; v++) {
+        const a = Math.abs(channels[f * 9 + v]);
+        if (a > peaks[v]) peaks[v] = a;
+      }
+    }
+    // Primary SID voice 1 active.
+    expect(peaks[0]).toBeGreaterThan(0.005);
+    // Secondary SID voice 1 active (index 3 = slot 1, voice 0).
+    expect(peaks[3]).toBeGreaterThan(0.005);
+    // Slot 2 (third SID) inactive → zero.
+    for (let v = 6; v < 9; v++) {
+      expect(peaks[v]).toBeLessThan(0.01);
+    }
     tune.dispose();
   });
 

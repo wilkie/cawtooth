@@ -75,11 +75,19 @@ export function createOscilloscope(
   const smoothedPeaks = new Float32Array(voiceCount);
 
   const ingest: ChannelsListener = (data, numFrames) => {
-    // data layout: frame-interleaved [f0_v0..f0_v(n-1), f1_v0..f1_v(n-1), ...]
+    // data is frame-interleaved `[f0_v0..f0_v(stride-1), f1_v0..., ...]`.
+    // The stride (voices per frame in the data) is inferred from the
+    // buffer length, NOT from our display voiceCount — the PSID worklet
+    // always emits 9 voices regardless of how many SIDs are active, and
+    // this scope may only render a subset. When numFrames is zero we
+    // can't infer a stride, so skip.
+    if (numFrames === 0) return;
+    const stride = (data.length / numFrames) | 0;
+    const showCount = Math.min(voiceCount, stride);
     for (let f = 0; f < numFrames; f++) {
       const ringPos = (writeIdx + f) % RING_SIZE;
-      const base = f * voiceCount;
-      for (let v = 0; v < voiceCount; v++) {
+      const base = f * stride;
+      for (let v = 0; v < showCount; v++) {
         rings[v][ringPos] = data[base + v];
       }
     }
