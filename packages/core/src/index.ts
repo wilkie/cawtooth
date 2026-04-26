@@ -69,6 +69,34 @@ export { SidPlayer } from './audio/sid-player.js';
 export type { SidPlayerOptions } from './audio/sid-player.js';
 
 export {
+  asAyumiExports,
+  compileAyumi,
+  createAyumiImports,
+  instantiateAyumi,
+} from './chip/ayumi-loader.js';
+export type { AyumiExports } from './chip/ayumi-loader.js';
+export {
+  AyumiChip,
+  AY_VOICE_COUNT,
+  AY_CLOCK_ZX,
+  AY_CLOCK_ATARI_ST,
+  AY_CLOCK_AMSTRAD_CPC,
+  AY_CLOCK_MSX,
+} from './chip/ayumi-chip.js';
+export type { AyChipModel, AyChipOptions } from './chip/ayumi-chip.js';
+
+export { AyPlayer } from './audio/ay-player.js';
+export type { AyPlayerOptions } from './audio/ay-player.js';
+
+export { AY_PROCESSOR_NAME } from './worklet/ay-processor-name.js';
+export type {
+  AyChannelsMessage,
+  AyRegisterWrite,
+  FromAyWorkletMessage,
+  ToAyWorkletMessage,
+} from './worklet/ay-messages.js';
+
+export {
   renderToPcm,
   renderToWav,
   renderSidTuneToPcm,

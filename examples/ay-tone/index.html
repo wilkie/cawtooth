@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>cawtooth — AY-3-8910 chord</title>
+    <style>
+      body {
+        font-family:
+          system-ui,
+          -apple-system,
+          sans-serif;
+        padding: 2rem;
+        max-width: 48rem;
+        margin: 0 auto;
+        line-height: 1.5;
+      }
+      h1 {
+        margin-top: 0;
+      }
+      .row {
+        margin: 0.75rem 0;
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      label {
+        font-size: 0.9rem;
+      }
+      button {
+        font-size: 1rem;
+        padding: 0.5rem 1.25rem;
+        cursor: pointer;
+      }
+      button:disabled {
+        cursor: wait;
+        opacity: 0.6;
+      }
+      select {
+        font-size: 0.95rem;
+        padding: 0.35rem 0.5rem;
+      }
+      .status {
+        margin-top: 1rem;
+        padding: 0.75rem 1rem;
+        background: #f4f4f4;
+        border-radius: 4px;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: 0.9rem;
+      }
+      code {
+        background: #f4f4f4;
+        padding: 0.1em 0.3em;
+        border-radius: 3px;
+      }
+      h2 {
+        margin-top: 2rem;
+        font-size: 1.1rem;
+      }
+      .scope-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+      }
+      .scope-voice {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .scope-voice canvas {
+        width: 100%;
+        height: 80px;
+        background: #0e1015;
+        border-radius: 3px;
+        display: block;
+      }
+      .scope-voice .voice-label {
+        font-size: 0.75rem;
+        color: #666;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>cawtooth — AY-3-8910 chord</h1>
+    <p>
+      Boots Peter Sovietov's Ayumi emulator (AY-3-8910 / YM2149) in an AudioWorklet, programs all
+      three tone channels with the notes of a chord, and triggers them simultaneously. This is the
+      AY counterpart to the SID and OPL tone demos — proves the chip-emulator path through the new
+      worklet end-to-end.
+    </p>
+    <div class="row">
+      <label>
+        Chip:
+        <select id="model">
+          <option value="AY-3-8910" selected>AY-3-8910 (16-step envelope)</option>
+          <option value="YM2149">YM2149 (32-step envelope)</option>
+        </select>
+      </label>
+      <label>
+        Host clock:
+        <select id="clock">
+          <option value="1773400" selected>ZX Spectrum (1.7734 MHz)</option>
+          <option value="2000000">Atari ST (2 MHz)</option>
+          <option value="1000000">Amstrad CPC (1 MHz)</option>
+          <option value="1789773">MSX (1.79 MHz)</option>
+        </select>
+      </label>
+      <label>
+        Chord:
+        <select id="chord">
+          <option value="A-major" selected>A major (A4 / C♯5 / E5)</option>
+          <option value="A-minor">A minor (A4 / C5 / E5)</option>
+          <option value="C-major">C major (C4 / E4 / G4)</option>
+          <option value="C-major-7">C maj7 (C4 / E4 / G4 / [B4 ignored])</option>
+        </select>
+      </label>
+    </div>
+    <div class="row">
+      <label>
+        <input id="envelope" type="checkbox" />
+        Envelope on (shape 0x0E "ramp+repeat")
+      </label>
+      <label>
+        <input id="noise" type="checkbox" />
+        Mix noise into channel A
+      </label>
+    </div>
+    <div class="row">
+      <button id="play">Play chord</button>
+      <button id="stop">Stop</button>
+    </div>
+    <div class="status" id="status">idle — click Play to initialize</div>
+
+    <h2>Per-voice oscilloscope</h2>
+    <p style="color: #666; font-size: 0.9rem; margin-top: -0.25rem">
+      Each canvas traces one of the AY's three tone channels (A / B / C). Default ABC stereo panning
+      routes A to the left, B to the center, and C to the right.
+    </p>
+    <div class="scope-grid" id="scope"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

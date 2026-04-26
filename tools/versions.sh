@@ -25,6 +25,13 @@ RESID_COMMIT="ef7873fc8c8379dc14cef8d9ccf9b3d34d0cc439"
 # and consolidated bug fixes.
 FAKE6502_COMMIT="b52676f840983219b0b9baa13f1d0ebc07aac9f9"
 
+# Ayumi (Peter Sovietov's AY-3-8910 / YM2149 emulator) source commit.
+# BSD 2-clause. Single-file C emulator that models DC/DAC, panning, and
+# both AY-3-8910 (16-step envelope) and YM2149 (32-step envelope)
+# variants. Used for ZX Spectrum / Atari ST / Amstrad CPC chiptune
+# playback; see tools/setup-ayumi.sh.
+AYUMI_COMMIT="07c08b4874c359169e4a028edf73f046d8b763e2"
+
 # AdPlug version used for the HERAD A/B harness
 # (tools/adplug-capture/). Not vendored — provided by the system package
 # (Debian: libadplug-dev). The harness is optional; the main test suite

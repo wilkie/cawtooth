@@ -8,6 +8,9 @@ package-lock.json
 pnpm-lock.yaml
 tools/emsdk/
 tools/nuked-opl3/
+tools/resid/
+tools/fake6502/
+tools/ayumi/
 packages/core/native/
 packages/core/wasm/
 

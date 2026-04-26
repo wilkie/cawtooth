@@ -14,9 +14,11 @@ declare global {
       oplWorklet: string;
       psidWorklet: string;
       sidWorklet: string;
+      ayWorklet: string;
       oplWasm: string;
       sidplayWasm: string;
       residWasm: string;
+      ayumiWasm: string;
     };
     /**
      * Decode a base64 string into a fresh ArrayBuffer. Test convenience —

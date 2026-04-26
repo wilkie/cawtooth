@@ -4,6 +4,7 @@
 #   packages/core/wasm/nuked-opl3.wasm  (Yamaha OPL2/OPL3)
 #   packages/core/wasm/resid.wasm       (MOS 6581/8580 SID, chip only)
 #   packages/core/wasm/sidplay.wasm     (fake6502 + reSID + 64KB RAM for PSID playback)
+#   packages/core/wasm/ayumi.wasm       (AY-3-8910 / YM2149, chip only)
 
 set -euo pipefail
 
@@ -16,6 +17,7 @@ EMSDK_DIR="$SCRIPT_DIR/emsdk"
 NUKED_DIR="$SCRIPT_DIR/nuked-opl3"
 RESID_DIR="$SCRIPT_DIR/resid/src"
 FAKE_DIR="$SCRIPT_DIR/fake6502"
+AYUMI_DIR="$SCRIPT_DIR/ayumi"
 NATIVE_DIR="$REPO_ROOT/packages/core/native"
 WASM_DIR="$REPO_ROOT/packages/core/wasm"
 
@@ -41,6 +43,11 @@ fi
 
 if [ ! -f "$FAKE_DIR/fake6502.c" ]; then
   echo "Error: fake6502 not vendored. Run: tools/setup-fake6502.sh"
+  exit 1
+fi
+
+if [ ! -f "$AYUMI_DIR/ayumi.c" ]; then
+  echo "Error: Ayumi not vendored. Run: tools/setup-ayumi.sh"
   exit 1
 fi
 
@@ -173,3 +180,42 @@ emcc \
 echo ""
 echo "==> Built: $WASM_DIR/sidplay.wasm"
 ls -lh "$WASM_DIR/sidplay.wasm"
+
+AY_EXPORTS='[
+  "_cawtooth_ay_create",
+  "_cawtooth_ay_destroy",
+  "_cawtooth_ay_reset",
+  "_cawtooth_ay_write",
+  "_cawtooth_ay_read",
+  "_cawtooth_ay_set_pan",
+  "_cawtooth_ay_generate",
+  "_cawtooth_ay_generate_channels",
+  "_cawtooth_ay_chip_size",
+  "_malloc",
+  "_free"
+]'
+
+echo ""
+echo "==> Compiling Ayumi + wrapper to WASM"
+# Plain C build — Ayumi is single-file C, wrapper is C, no C++ stdlib
+# bring-up needed. -msimd128 is harmless here (Ayumi's hot path is the
+# 192-tap FIR decimator, which the compiler vectorizes when given the
+# chance). 1 MiB initial memory — Ayumi's working set is tiny (a few
+# KB struct + ~3 KB FIR delay lines).
+emcc \
+  -O3 \
+  -DNDEBUG \
+  -msimd128 \
+  -I "$AYUMI_DIR" \
+  "$AYUMI_DIR/ayumi.c" \
+  "$NATIVE_DIR/ayumi-wrapper.c" \
+  -o "$WASM_DIR/ayumi.wasm" \
+  -sSTANDALONE_WASM=1 \
+  -sALLOW_MEMORY_GROWTH=1 \
+  -sINITIAL_MEMORY=1048576 \
+  -sEXPORTED_FUNCTIONS="$AY_EXPORTS" \
+  --no-entry
+
+echo ""
+echo "==> Built: $WASM_DIR/ayumi.wasm"
+ls -lh "$WASM_DIR/ayumi.wasm"

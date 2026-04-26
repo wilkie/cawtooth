@@ -21,16 +21,20 @@
     "./worklet/psid": {
       "import": "./dist/worklet/psid-processor.js"
     },
+    "./worklet/ay": {
+      "import": "./dist/worklet/ay-processor.js"
+    },
     "./wasm/nuked-opl3.wasm": "./wasm/nuked-opl3.wasm",
     "./wasm/resid.wasm": "./wasm/resid.wasm",
-    "./wasm/sidplay.wasm": "./wasm/sidplay.wasm"
+    "./wasm/sidplay.wasm": "./wasm/sidplay.wasm",
+    "./wasm/ayumi.wasm": "./wasm/ayumi.wasm"
   },
   "files": [
     "dist",
     "wasm"
   ],
   "scripts": {
-    "build": "vite build && vite build --mode worklet && vite build --mode worklet-sid && vite build --mode worklet-psid",
+    "build": "vite build && vite build --mode worklet && vite build --mode worklet-sid && vite build --mode worklet-psid && vite build --mode worklet-ay",
     "dev": "vite build --watch",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch",

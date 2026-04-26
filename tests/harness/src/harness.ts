@@ -14,18 +14,22 @@ import * as cawtooth from 'cawtooth';
 import oplWorkletUrl from 'cawtooth/worklet/opl?url';
 import psidWorkletUrl from 'cawtooth/worklet/psid?url';
 import sidWorkletUrl from 'cawtooth/worklet/sid?url';
+import ayWorkletUrl from 'cawtooth/worklet/ay?url';
 import oplWasmUrl from 'cawtooth/wasm/nuked-opl3.wasm?url';
 import sidWasmUrl from 'cawtooth/wasm/sidplay.wasm?url';
 import residWasmUrl from 'cawtooth/wasm/resid.wasm?url';
+import ayumiWasmUrl from 'cawtooth/wasm/ayumi.wasm?url';
 
 window.cawtooth = cawtooth;
 window.cawtoothUrls = {
   oplWorklet: oplWorkletUrl,
   psidWorklet: psidWorkletUrl,
   sidWorklet: sidWorkletUrl,
+  ayWorklet: ayWorkletUrl,
   oplWasm: oplWasmUrl,
   sidplayWasm: sidWasmUrl,
   residWasm: residWasmUrl,
+  ayumiWasm: ayumiWasmUrl,
 };
 window.b64ToBytes = (b64: string): ArrayBuffer => {
   const bin = atob(b64);

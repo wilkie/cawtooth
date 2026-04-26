@@ -63,10 +63,12 @@ function workletConfig(entry: string, outFile: string): UserConfig {
 const oplWorkletConfig = workletConfig('src/worklet/opl-processor.ts', 'opl-processor.js');
 const sidWorkletConfig = workletConfig('src/worklet/sid-processor.ts', 'sid-processor.js');
 const psidWorkletConfig = workletConfig('src/worklet/psid-processor.ts', 'psid-processor.js');
+const ayWorkletConfig = workletConfig('src/worklet/ay-processor.ts', 'ay-processor.js');
 
 export default defineConfig(({ mode }) => {
   if (mode === 'worklet') return oplWorkletConfig;
   if (mode === 'worklet-sid') return sidWorkletConfig;
   if (mode === 'worklet-psid') return psidWorkletConfig;
+  if (mode === 'worklet-ay') return ayWorkletConfig;
   return libConfig;
 });

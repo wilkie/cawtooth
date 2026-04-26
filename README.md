@@ -11,6 +11,7 @@ player.
 - **IMF**, **WLF**: Id Software Music Format housing OPL2 AdLib commands from earlier Id Software games such as Commander Keen and Wolfenstein 3D
 - **HSQ**, **SQX**, **AGD**, **HA2**: Cryo's HERAD music format that was used to sequence OPL2/3 AdLib music in games such as Dune,
 - **SID**: The PSID format which contains Commodore 64 instructions that are emulated to produce music for the SID chip.
+- **AY-3-8910 / YM2149**: chip support for the General Instrument PSG used by the ZX Spectrum 128, Atari ST, Amstrad CPC, MSX, and many arcade machines. Phase 1 ships the chip emulator and a low-level register-write player; format parsers (`.vtx`, `.ym`, `.psg`, `.ay`) land in a follow-up phase.
 
 ## Installation
 
@@ -149,6 +150,7 @@ Vite dev server on a fixed port):
 pnpm --filter @cawtooth-examples/player dev    # universal player demo
 pnpm --filter @cawtooth-examples/imf dev       # IMF / WLF demo
 pnpm --filter @cawtooth-examples/sid dev       # PSID / RSID demo
+pnpm --filter @cawtooth-examples/ay-tone dev   # AY-3-8910 / YM2149 chord demo
 # …also: dro, herad, sid-tone, tone
 ```
 
@@ -164,7 +166,8 @@ emulator's pinned commit in `tools/versions.sh` — needs Emscripten:
 ./tools/setup-nuked.sh        # vendor Nuked-OPL3 source
 ./tools/setup-resid.sh        # vendor reSID source
 ./tools/setup-fake6502.sh     # vendor fake6502 source
-./tools/build-wasm.sh         # compile all three .wasm targets
+./tools/setup-ayumi.sh        # vendor Ayumi source
+./tools/build-wasm.sh         # compile all four .wasm targets
 ```
 
 Each vendored source lives under `tools/<name>/` and is gitignored. The
@@ -221,6 +224,11 @@ preservation through emulation, reverse engineering, and documentation.
   emulator originally by Mike Chambers, with the ivop fork's NMOS
   undocumented opcodes and bug fixes. Acts as the 6510 CPU core for PSID
   playback.
+- [**Ayumi**](https://github.com/true-grue/ayumi) — General Instrument
+  AY-3-8910 / Yamaha YM2149 emulator by Peter Sovietov. Models the
+  paired-step AY DAC and the YM's 32-step envelope DAC, with proper
+  per-channel pan, DC removal, and 8× FIR-decimated output. Drives all
+  ZX Spectrum / Atari ST / Amstrad CPC / MSX chiptune playback.
 
 **Build toolchain**:
 
