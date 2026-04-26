@@ -10,7 +10,6 @@ import {
   type ProgressInfo,
   type PsidPlayerInfo,
   type PsidSong,
-  type SongLengths,
   type SongLengthsDb,
 } from 'cawtooth';
 import workletUrl from 'cawtooth/worklet/psid?url';
@@ -145,9 +144,7 @@ function pushDurationToPlayer(): void {
 
 function renderDuration(): void {
   if (!currentSong || !songlengthsDb) {
-    metaDuration.textContent = songlengthsDb
-      ? '—'
-      : 'load Songlengths.md5 to show';
+    metaDuration.textContent = songlengthsDb ? '—' : 'load Songlengths.md5 to show';
     return;
   }
   const entry = lookupSongLengths(currentSong, songlengthsDb);
@@ -215,8 +212,7 @@ playBtn.addEventListener('click', async () => {
     }
 
     const sidBytes =
-      pendingSidBytes ??
-      (sourceSel.value === 'picker' ? await loadPicked() : await loadBatman());
+      pendingSidBytes ?? (sourceSel.value === 'picker' ? await loadPicked() : await loadBatman());
 
     currentSidBytes = sidBytes;
     // Parse locally so the duration lookup has something to hash. This

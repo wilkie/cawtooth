@@ -76,7 +76,9 @@ export function parsePsid(buffer: ArrayBuffer | Uint8Array): PsidSong {
     );
   }
   if (bytes.length < dataOffset) {
-    throw new Error(`psid: file truncated — header claims ${dataOffset} bytes but file is ${bytes.length}`);
+    throw new Error(
+      `psid: file truncated — header claims ${dataOffset} bytes but file is ${bytes.length}`,
+    );
   }
 
   const loadAddressField = view.getUint16(8, false);

@@ -106,9 +106,7 @@ export class RegisterSequencer {
    */
   get isFinished(): boolean {
     return (
-      !this.loop &&
-      this.eventIndex >= this.eventCount &&
-      this.currentSample >= this.loopSamples
+      !this.loop && this.eventIndex >= this.eventCount && this.currentSample >= this.loopSamples
     );
   }
 

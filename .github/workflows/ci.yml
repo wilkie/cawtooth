@@ -1,0 +1,99 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel an in-flight run for the same branch when a new commit lands.
+# Saves CI time when force-pushing through review iterations.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Fast feedback path: lint, format, typecheck, and the Node-side Jest
+  # suite. Runs in parallel with the e2e job so contributors don't have
+  # to wait for Chromium just to see whether their unit tests pass.
+  lint-and-test:
+    name: lint, typecheck, jest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: lint
+        run: pnpm lint
+      - name: format check
+        run: pnpm format:check
+      # Build the core package before recursive typecheck — examples
+      # consume cawtooth via dist/ and tsc resolves their imports against
+      # those bundled .d.ts files.
+      - name: build core
+        run: pnpm build
+      - name: typecheck (workspace)
+        run: pnpm -r typecheck
+      - name: jest
+        run: pnpm test
+
+  # Heavy path: full Chromium download + Playwright browser harness.
+  # Independent of the lint job so unit-test failures don't suppress
+  # e2e signal (and vice versa).
+  e2e:
+    name: playwright (chromium)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # Cache the Playwright browser binaries across runs. Keyed on the
+      # @playwright/test version so a dep bump invalidates correctly.
+      - name: Resolve Playwright version
+        id: playwright-version
+        run: |
+          version=$(node -p "require('./tests/node_modules/@playwright/test/package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+
+      - name: Install Chromium (with system deps)
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: pnpm --filter @cawtooth-tests/e2e exec playwright install --with-deps chromium
+      # When the browsers are cached, we still need apt deps for headless
+      # Chromium to start. `install-deps` is idempotent and quick.
+      - name: Install browser system deps (cache hit path)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: pnpm --filter @cawtooth-tests/e2e exec playwright install-deps chromium
+
+      # Examples consume cawtooth from dist/, and the harness imports from
+      # cawtooth too. Build before launching Playwright's webServer.
+      - name: Build core
+        run: pnpm build
+
+      - name: Run Playwright tests
+        run: pnpm --filter @cawtooth-tests/e2e test
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: tests/playwright-report/
+          retention-days: 14

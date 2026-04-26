@@ -136,9 +136,7 @@ export class SidTune {
 
     this.scratchSamples = INITIAL_SCRATCH_SAMPLES;
     this.scratchPtr = this.exports.malloc(this.scratchSamples * 2);
-    this.channelsScratchPtr = this.exports.malloc(
-      this.scratchSamples * PSID_MAX_VOICE_COUNT * 2,
-    );
+    this.channelsScratchPtr = this.exports.malloc(this.scratchSamples * PSID_MAX_VOICE_COUNT * 2);
     if (!this.scratchPtr || !this.channelsScratchPtr) {
       this.exports.cawtooth_sidplay_destroy();
       throw new Error('cawtooth: failed to allocate sample scratch');
@@ -162,9 +160,7 @@ export class SidTune {
    */
   initSong(subsong: number): number {
     if (subsong < 1 || subsong > this.song.songs) {
-      throw new Error(
-        `cawtooth: subsong ${subsong} out of range [1, ${this.song.songs}]`,
-      );
+      throw new Error(`cawtooth: subsong ${subsong} out of range [1, ${this.song.songs}]`);
     }
     const speedBitIndex = (subsong - 1) % 32;
     const useCiaTimer = ((this.song.speed >>> speedBitIndex) & 1) === 1;
@@ -296,9 +292,7 @@ export class SidTune {
     this.exports.free(this.channelsScratchPtr);
     this.scratchSamples = numSamples;
     this.scratchPtr = this.exports.malloc(numSamples * 2);
-    this.channelsScratchPtr = this.exports.malloc(
-      numSamples * PSID_MAX_VOICE_COUNT * 2,
-    );
+    this.channelsScratchPtr = this.exports.malloc(numSamples * PSID_MAX_VOICE_COUNT * 2);
     if (!this.scratchPtr || !this.channelsScratchPtr) {
       throw new Error('cawtooth: failed to grow sample scratch');
     }

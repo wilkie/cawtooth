@@ -4,12 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
 import { parsePsid } from './parser.js';
-import {
-  computeSidTuneMd5,
-  lookupSongLengths,
-  md5,
-  parseSongLengthsDb,
-} from './songlengths.js';
+import { computeSidTuneMd5, lookupSongLengths, md5, parseSongLengthsDb } from './songlengths.js';
 
 function nodeMd5(bytes: Uint8Array): string {
   return createHash('md5').update(bytes).digest('hex');
@@ -138,17 +133,13 @@ describe('parseSongLengthsDb', () => {
   });
 
   it('lowercases the hex key so inputs are case-insensitive', () => {
-    const db = parseSongLengthsDb(
-      'ABCDEF0123456789ABCDEF0123456789=1:00\n',
-    );
+    const db = parseSongLengthsDb('ABCDEF0123456789ABCDEF0123456789=1:00\n');
     expect(db.has('abcdef0123456789abcdef0123456789')).toBe(true);
   });
 
   it('parses fractional durations with any millisecond width', () => {
     const db = parseSongLengthsDb(
-      [
-        'abcdef0123456789abcdef0123456789=0:05 0:05.5 0:05.123',
-      ].join('\n'),
+      ['abcdef0123456789abcdef0123456789=0:05 0:05.5 0:05.123'].join('\n'),
     );
     const entry = db.get('abcdef0123456789abcdef0123456789');
     expect(entry?.durations).toEqual([5, 5.5, 5.123]);

@@ -117,10 +117,7 @@ export class CawtoothPlayer {
    * Player ready for `play()`. The returned player shares this factory's
    * AudioContext.
    */
-  async load(
-    bytes: ArrayBuffer | Uint8Array,
-    options: CawtoothLoadOptions = {},
-  ): Promise<Player> {
+  async load(bytes: ArrayBuffer | Uint8Array, options: CawtoothLoadOptions = {}): Promise<Player> {
     const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
     const format = options.format ?? detectFormat(view, options.filename);
 

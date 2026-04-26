@@ -65,9 +65,7 @@ export async function compileReSid(
   return await WebAssembly.compile(source);
 }
 
-export async function instantiateReSid(
-  module: WebAssembly.Module,
-): Promise<WebAssembly.Instance> {
+export async function instantiateReSid(module: WebAssembly.Module): Promise<WebAssembly.Instance> {
   return await WebAssembly.instantiate(module, createReSidImports());
 }
 

@@ -20,38 +20,6 @@ const TEST_TONE_WRITES = [
   { reg: 0xb0, value: 0x32 },
 ] as const;
 
-/**
- * Sum the magnitudes of channel-tap samples that arrive over `ms` ms.
- * Returns the count of samples with magnitude above `threshold`. Used as
- * a "did audio actually flow?" check — exact waveforms are verified by
- * Node-side unit tests, not here.
- */
-async function captureNonZeroSamples(
-  page: import('@playwright/test').Page,
-  fn: string,
-  ms: number,
-  threshold = 0.0005,
-): Promise<number> {
-  return page.evaluate(
-    async ({ fnName, durationMs, thr }) => {
-      // The harness exposes a setup function that returns a player with
-      // an attached counter. We let the body run for `durationMs`, then
-      // tear down and return the count.
-      const setup = (window as unknown as Record<string, () => Promise<{
-        teardown(): Promise<void>;
-        getCount(): number;
-      }>>)[fnName];
-      const handle = await setup();
-      await new Promise((r) => setTimeout(r, durationMs));
-      const count = handle.getCount();
-      await handle.teardown();
-      void thr;
-      return count;
-    },
-    { fnName: fn, durationMs: ms, thr: threshold },
-  );
-}
-
 test.describe('OplPlayer', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');

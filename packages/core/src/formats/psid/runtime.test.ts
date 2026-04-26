@@ -64,13 +64,8 @@ function buildTinyPsid(opts: TinyPsidOptions = {}): Uint8Array {
   const PLAY_ADDR = 0x4100;
   const prologue = new Uint8Array(opts.initPrologue ?? []);
   const mainInit = new Uint8Array([
-    0xa9, 0x45, 0x8d, 0x00, 0xd4,
-    0xa9, 0x1d, 0x8d, 0x01, 0xd4,
-    0xa9, 0x00, 0x8d, 0x05, 0xd4,
-    0xa9, 0xf0, 0x8d, 0x06, 0xd4,
-    0xa9, 0x0f, 0x8d, 0x18, 0xd4,
-    0xa9, 0x11, 0x8d, 0x04, 0xd4,
-    0x60,
+    0xa9, 0x45, 0x8d, 0x00, 0xd4, 0xa9, 0x1d, 0x8d, 0x01, 0xd4, 0xa9, 0x00, 0x8d, 0x05, 0xd4, 0xa9,
+    0xf0, 0x8d, 0x06, 0xd4, 0xa9, 0x0f, 0x8d, 0x18, 0xd4, 0xa9, 0x11, 0x8d, 0x04, 0xd4, 0x60,
   ]);
   const initCode = new Uint8Array(prologue.length + mainInit.length);
   initCode.set(prologue, 0);
@@ -131,7 +126,9 @@ function buildTinyPsid(opts: TinyPsidOptions = {}): Uint8Array {
  * address into one of the two vectors and returns with RTS. The handler
  * is placed at the requested location and is just an RTI opcode.
  */
-function buildTinyRsid(opts: { handlerVector: 'soft' | 'hard' } = { handlerVector: 'soft' }): Uint8Array {
+function buildTinyRsid(
+  opts: { handlerVector: 'soft' | 'hard' } = { handlerVector: 'soft' },
+): Uint8Array {
   const INIT_ADDR = 0x4000;
   const HANDLER_ADDR = 0x4100;
 
@@ -142,18 +139,50 @@ function buildTinyRsid(opts: { handlerVector: 'soft' | 'hard' } = { handlerVecto
   const vectorHi = opts.handlerVector === 'soft' ? 0x15 : 0xff;
   const vectorPage = opts.handlerVector === 'soft' ? 0x03 : 0xff;
   const installCode = new Uint8Array([
-    0xa9, HANDLER_ADDR & 0xff, 0x8d, vectorLo, vectorPage,
-    0xa9, (HANDLER_ADDR >> 8) & 0xff, 0x8d, vectorHi, vectorPage,
+    0xa9,
+    HANDLER_ADDR & 0xff,
+    0x8d,
+    vectorLo,
+    vectorPage,
+    0xa9,
+    (HANDLER_ADDR >> 8) & 0xff,
+    0x8d,
+    vectorHi,
+    vectorPage,
   ]);
 
   // Same SID setup as the tiny PSID: voice 1 triangle, sustained envelope.
   const sidSetup = new Uint8Array([
-    0xa9, 0x45, 0x8d, 0x00, 0xd4,
-    0xa9, 0x1d, 0x8d, 0x01, 0xd4,
-    0xa9, 0x00, 0x8d, 0x05, 0xd4,
-    0xa9, 0xf0, 0x8d, 0x06, 0xd4,
-    0xa9, 0x0f, 0x8d, 0x18, 0xd4,
-    0xa9, 0x11, 0x8d, 0x04, 0xd4,
+    0xa9,
+    0x45,
+    0x8d,
+    0x00,
+    0xd4,
+    0xa9,
+    0x1d,
+    0x8d,
+    0x01,
+    0xd4,
+    0xa9,
+    0x00,
+    0x8d,
+    0x05,
+    0xd4,
+    0xa9,
+    0xf0,
+    0x8d,
+    0x06,
+    0xd4,
+    0xa9,
+    0x0f,
+    0x8d,
+    0x18,
+    0xd4,
+    0xa9,
+    0x11,
+    0x8d,
+    0x04,
+    0xd4,
     0x60, // RTS
   ]);
   const initCode = new Uint8Array(installCode.length + sidSetup.length);
@@ -333,11 +362,31 @@ describe('SidTune (PSID runtime)', () => {
     // Primary SID also gets its default voice-1 triangle from the shared
     // init tail, so slots [0..2] AND [3..5] should be active.
     const prologue = [
-      0xa9, 0x45, 0x8d, 0x20, 0xd4,   // freqLo secondary voice 1
-      0xa9, 0x1d, 0x8d, 0x21, 0xd4,   // freqHi
-      0xa9, 0xf0, 0x8d, 0x26, 0xd4,   // SR = sustain 15
-      0xa9, 0x0f, 0x8d, 0x38, 0xd4,   // secondary master volume
-      0xa9, 0x11, 0x8d, 0x24, 0xd4,   // triangle + gate
+      0xa9,
+      0x45,
+      0x8d,
+      0x20,
+      0xd4, // freqLo secondary voice 1
+      0xa9,
+      0x1d,
+      0x8d,
+      0x21,
+      0xd4, // freqHi
+      0xa9,
+      0xf0,
+      0x8d,
+      0x26,
+      0xd4, // SR = sustain 15
+      0xa9,
+      0x0f,
+      0x8d,
+      0x38,
+      0xd4, // secondary master volume
+      0xa9,
+      0x11,
+      0x8d,
+      0x24,
+      0xd4, // triangle + gate
     ];
     const tune = makeTune(
       buildTinyPsid({ version: 3, secondSIDAddress: 0x42, initPrologue: prologue }),
@@ -378,10 +427,7 @@ describe('SidTune (PSID runtime)', () => {
   it('CIA-speed subsongs pick up the timer value programmed at init', () => {
     // Init prologue: LDA #$34 / STA $DC04 / LDA #$12 / STA $DC05
     // This programs CIA 1 Timer A to $1234 = 4660 cycles.
-    const prologue = [
-      0xa9, 0x34, 0x8d, 0x04, 0xdc,
-      0xa9, 0x12, 0x8d, 0x05, 0xdc,
-    ];
+    const prologue = [0xa9, 0x34, 0x8d, 0x04, 0xdc, 0xa9, 0x12, 0x8d, 0x05, 0xdc];
     const tune = makeTune(buildTinyPsid({ speed: 1, initPrologue: prologue }));
     tune.initSong(1);
     expect(tune.effectivePlayInterval).toBe(0x1234); // 4660
@@ -403,10 +449,7 @@ describe('SidTune (PSID runtime)', () => {
     // speed bit says CIA, and init explicitly writes 0 to $DC04/$DC05.
     // That's an unusual but legitimate case (the tune doesn't want CIA);
     // we fall back to vblank so we don't hang on a zero-cycle frame.
-    const prologue = [
-      0xa9, 0x00, 0x8d, 0x04, 0xdc,
-      0xa9, 0x00, 0x8d, 0x05, 0xdc,
-    ];
+    const prologue = [0xa9, 0x00, 0x8d, 0x04, 0xdc, 0xa9, 0x00, 0x8d, 0x05, 0xdc];
     const tune = makeTune(buildTinyPsid({ speed: 1, initPrologue: prologue }));
     tune.initSong(1);
     expect(tune.effectivePlayInterval).toBe(19656);
@@ -415,10 +458,7 @@ describe('SidTune (PSID runtime)', () => {
 
   it('refreshes CIA state between subsong changes', () => {
     // First tune programs CIA with a specific value ($ABCD).
-    const prologueABCD = [
-      0xa9, 0xcd, 0x8d, 0x04, 0xdc,
-      0xa9, 0xab, 0x8d, 0x05, 0xdc,
-    ];
+    const prologueABCD = [0xa9, 0xcd, 0x8d, 0x04, 0xdc, 0xa9, 0xab, 0x8d, 0x05, 0xdc];
     const tune = makeTune(buildTinyPsid({ speed: 1, initPrologue: prologueABCD }));
     tune.initSong(1);
     expect(tune.effectivePlayInterval).toBe(0xabcd);
@@ -491,10 +531,7 @@ describe('SidTune (PSID runtime)', () => {
     //   8D 20 D4  STA $D420  (secondary voice 1 freqLo)
     //   8D 04 D4  STA $D404  (again — overwrite to $11)
     // End is the shared RTS from the common init tail.
-    const prologue = [
-      0xa9, 0x22, 0x8d, 0x04, 0xd4,
-      0xa9, 0x11, 0x8d, 0x20, 0xd4,
-    ];
+    const prologue = [0xa9, 0x22, 0x8d, 0x04, 0xd4, 0xa9, 0x11, 0x8d, 0x20, 0xd4];
     const tune = makeTune(
       buildTinyPsid({ version: 3, secondSIDAddress: 0x42, initPrologue: prologue }),
     );
@@ -515,11 +552,31 @@ describe('SidTune (PSID runtime)', () => {
     const prologue = [
       // Primary SID voice 1 stays untouched in prologue (handled by
       // common init). Program secondary's voice 1 with sustained triangle:
-      0xa9, 0x45, 0x8d, 0x00, 0xd5,   // freqLo
-      0xa9, 0x1d, 0x8d, 0x01, 0xd5,   // freqHi
-      0xa9, 0xf0, 0x8d, 0x06, 0xd5,   // S=15, R=0
-      0xa9, 0x0f, 0x8d, 0x18, 0xd5,   // volume 15
-      0xa9, 0x11, 0x8d, 0x04, 0xd5,   // triangle + gate
+      0xa9,
+      0x45,
+      0x8d,
+      0x00,
+      0xd5, // freqLo
+      0xa9,
+      0x1d,
+      0x8d,
+      0x01,
+      0xd5, // freqHi
+      0xa9,
+      0xf0,
+      0x8d,
+      0x06,
+      0xd5, // S=15, R=0
+      0xa9,
+      0x0f,
+      0x8d,
+      0x18,
+      0xd5, // volume 15
+      0xa9,
+      0x11,
+      0x8d,
+      0x04,
+      0xd5, // triangle + gate
     ];
     const tune = makeTune(
       buildTinyPsid({ version: 3, secondSIDAddress: 0x50, initPrologue: prologue }),
@@ -536,9 +593,7 @@ describe('SidTune (PSID runtime)', () => {
     // Write $77 to $D5E0 (thirdSIDAddress byte 0x5E → address $D5E0,
     // just inside the valid-extras range). Verify the RAM-level write
     // sticks and no writes collide.
-    const prologue = [
-      0xa9, 0x77, 0x8d, 0xe0, 0xd5,
-    ];
+    const prologue = [0xa9, 0x77, 0x8d, 0xe0, 0xd5];
     const tune = makeTune(
       buildTinyPsid({
         version: 4,

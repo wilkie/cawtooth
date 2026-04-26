@@ -1,9 +1,6 @@
 import { PSID_MAX_VOICE_COUNT, SidTune } from '../formats/psid/runtime.js';
 import { createSidplayImports } from '../formats/psid/sidplay-loader.js';
-import type {
-  FromPsidWorkletMessage,
-  ToPsidWorkletMessage,
-} from './psid-messages.js';
+import type { FromPsidWorkletMessage, ToPsidWorkletMessage } from './psid-messages.js';
 import { PSID_PROCESSOR_NAME } from './psid-processor-name.js';
 
 /** Minimum seconds between consecutive `progress` messages. */
@@ -206,11 +203,7 @@ class CawtoothPsidProcessor extends AudioWorkletProcessor {
       });
       this.lastProgressAtSec = elapsedSec;
     }
-    if (
-      !this.endedFired &&
-      this.durationSec !== null &&
-      elapsedSec >= this.durationSec
-    ) {
+    if (!this.endedFired && this.durationSec !== null && elapsedSec >= this.durationSec) {
       this.endedFired = true;
       this.post({ type: 'ended' });
     }

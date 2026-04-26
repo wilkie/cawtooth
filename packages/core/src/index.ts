@@ -16,17 +16,8 @@ export {
   instantiateReSid,
 } from './chip/resid-loader.js';
 export type { ReSidExports } from './chip/resid-loader.js';
-export {
-  SidChip,
-  SID_CLOCK_PAL,
-  SID_CLOCK_NTSC,
-  SID_VOICE_COUNT,
-} from './chip/resid-sid.js';
-export type {
-  SidChipModel,
-  SidChipOptions,
-  SidSamplingMethod,
-} from './chip/resid-sid.js';
+export { SidChip, SID_CLOCK_PAL, SID_CLOCK_NTSC, SID_VOICE_COUNT } from './chip/resid-sid.js';
+export type { SidChipModel, SidChipOptions, SidSamplingMethod } from './chip/resid-sid.js';
 
 export type {
   RegisterEventStream,
@@ -84,11 +75,7 @@ export {
   renderSidTuneToWav,
   encodeWav,
 } from './audio/export.js';
-export type {
-  RenderToPcmOptions,
-  RenderSidTuneOptions,
-  EncodeWavOptions,
-} from './audio/export.js';
+export type { RenderToPcmOptions, RenderSidTuneOptions, EncodeWavOptions } from './audio/export.js';
 
 export { OPL_PROCESSOR_NAME } from './worklet/opl-processor-name.js';
 export type { FromWorkletMessage, ToWorkletMessage } from './worklet/messages.js';

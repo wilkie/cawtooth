@@ -16,16 +16,8 @@ export interface SidplayExports {
     method: number,
   ) => number;
   readonly cawtooth_sidplay_destroy: () => void;
-  readonly cawtooth_sidplay_set_extra_sid: (
-    index: number,
-    baseAddr: number,
-    model: number,
-  ) => void;
-  readonly cawtooth_sidplay_load: (
-    loadAddr: number,
-    dataPtr: number,
-    length: number,
-  ) => void;
+  readonly cawtooth_sidplay_set_extra_sid: (index: number, baseAddr: number, model: number) => void;
+  readonly cawtooth_sidplay_load: (loadAddr: number, dataPtr: number, length: number) => void;
   readonly cawtooth_sidplay_init: (
     initAddr: number,
     songNum: number,

@@ -10,3 +10,7 @@ tools/emsdk/
 tools/nuked-opl3/
 packages/core/native/
 packages/core/wasm/
+
+# Playwright auto-generated artifacts.
+tests/test-results/
+tests/playwright-report/
