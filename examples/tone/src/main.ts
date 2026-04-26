@@ -1,5 +1,5 @@
 import { OplPlayer, type OplRegisterWrite } from 'cawtooth';
-import workletUrl from 'cawtooth/worklet?url';
+import workletUrl from 'cawtooth/worklet/opl?url';
 import wasmUrl from 'cawtooth/wasm/nuked-opl3.wasm?url';
 
 const TEST_TONE: readonly OplRegisterWrite[] = [

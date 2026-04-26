@@ -11,7 +11,7 @@
  * `page.evaluate()`.
  */
 import * as cawtooth from 'cawtooth';
-import oplWorkletUrl from 'cawtooth/worklet?url';
+import oplWorkletUrl from 'cawtooth/worklet/opl?url';
 import psidWorkletUrl from 'cawtooth/worklet/psid?url';
 import sidWorkletUrl from 'cawtooth/worklet/sid?url';
 import oplWasmUrl from 'cawtooth/wasm/nuked-opl3.wasm?url';

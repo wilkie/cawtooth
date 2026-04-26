@@ -19,7 +19,7 @@ npm install cawtooth
 ```
 
 The package ships ESM + CJS bundles, generated `.d.ts` files, the bundled
-AudioWorklet processors (under `cawtooth/worklet`, `cawtooth/worklet/sid`,
+AudioWorklet processors (under `cawtooth/worklet/opl`, `cawtooth/worklet/sid`,
 `cawtooth/worklet/psid`), and the WebAssembly chip emulators (under
 `cawtooth/wasm/*.wasm`). Most browser bundlers can resolve these via the
 `?url` import suffix — see the examples for the exact wiring.
@@ -36,7 +36,7 @@ from the bytes (or filename), parses the file, and returns a ready-to-play
 
 ```ts
 import { CawtoothPlayer } from 'cawtooth';
-import oplWorkletUrl from 'cawtooth/worklet?url';
+import oplWorkletUrl from 'cawtooth/worklet/opl?url';
 import oplWasmUrl from 'cawtooth/wasm/nuked-opl3.wasm?url';
 
 const factory = await CawtoothPlayer.init({

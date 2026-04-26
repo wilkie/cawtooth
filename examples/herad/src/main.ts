@@ -15,7 +15,7 @@ import {
   type RegisterEventStream,
   type TimedRegisterStream,
 } from 'cawtooth';
-import workletUrl from 'cawtooth/worklet?url';
+import workletUrl from 'cawtooth/worklet/opl?url';
 import wasmUrl from 'cawtooth/wasm/nuked-opl3.wasm?url';
 
 import { createOscilloscope } from './oscilloscope.js';
