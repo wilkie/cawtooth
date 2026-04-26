@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>cawtooth — universal player</title>
+    <style>
+      body {
+        font-family:
+          system-ui,
+          -apple-system,
+          sans-serif;
+        padding: 2rem;
+        max-width: 52rem;
+        margin: 0 auto;
+        line-height: 1.5;
+      }
+      h1 {
+        margin-top: 0;
+      }
+      h2 {
+        margin-top: 2rem;
+        font-size: 1.1rem;
+      }
+      .row {
+        margin: 0.75rem 0;
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      label {
+        font-size: 0.9rem;
+      }
+      button {
+        font-size: 1rem;
+        padding: 0.5rem 1.25rem;
+        cursor: pointer;
+      }
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+      select,
+      input[type='file'] {
+        font-size: 0.95rem;
+        padding: 0.35rem 0.5rem;
+      }
+      .status {
+        margin-top: 1rem;
+        padding: 0.75rem 1rem;
+        background: #f4f4f4;
+        border-radius: 4px;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: 0.9rem;
+        white-space: pre-line;
+      }
+      .meta {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 0.25rem 1rem;
+        font-size: 0.9rem;
+        margin-top: 1rem;
+      }
+      .meta dt {
+        font-weight: 600;
+        color: #555;
+      }
+      .meta dd {
+        margin: 0;
+      }
+      code {
+        background: #f4f4f4;
+        padding: 0.1em 0.3em;
+        border-radius: 3px;
+      }
+      .scope-grid {
+        display: grid;
+        gap: 6px;
+      }
+      .scope-grid.cols-3 {
+        grid-template-columns: repeat(3, 1fr);
+      }
+      .scope-grid.cols-6 {
+        grid-template-columns: repeat(6, 1fr);
+      }
+      .scope-grid.cols-9 {
+        grid-template-columns: repeat(3, 1fr);
+      }
+      .scope-grid.cols-18 {
+        grid-template-columns: repeat(6, 1fr);
+      }
+      .scope-voice {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .scope-voice canvas {
+        width: 100%;
+        height: 60px;
+        background: #0e1015;
+        border-radius: 3px;
+        display: block;
+      }
+      .scope-voice .voice-label {
+        font-size: 0.7rem;
+        color: #666;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        text-align: center;
+      }
+      .progress-row {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-top: 0.75rem;
+      }
+      .progress-bar {
+        flex: 1;
+        height: 6px;
+        background: #eaeaea;
+        border-radius: 3px;
+        overflow: hidden;
+      }
+      .progress-fill {
+        height: 100%;
+        background: #4a6cf7;
+        width: 0%;
+        transition: width 80ms linear;
+      }
+      .time-elapsed,
+      .time-total {
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: 0.85rem;
+        color: #666;
+        min-width: 3em;
+        text-align: center;
+      }
+      .format-controls > * {
+        display: none;
+      }
+      .format-controls.opl .opl-only,
+      .format-controls.psid .psid-only,
+      .format-controls.any .any {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>cawtooth — universal player</h1>
+    <p>
+      Pick any supported chiptune file and play it. The library auto-detects format from the bytes
+      (PSID/RSID, DRO, HSQ/SQX-compressed HERAD) or from the filename (raw IMF, decompressed
+      HERAD). One <code>CawtoothPlayer</code> instance dispatches to the right worklet under the
+      hood.
+    </p>
+
+    <div class="row">
+      <input
+        id="file"
+        type="file"
+        accept=".sid,.imf,.wlf,.ims,.dro,.hsq,.sqx,.agd,.ha2,application/octet-stream"
+      />
+    </div>
+
+    <div class="row format-controls" id="format-controls">
+      <label class="opl-only">
+        IMF tick rate:
+        <select id="tick-rate">
+          <option value="560">560 Hz (Keen)</option>
+          <option value="700" selected>700 Hz (Wolf3D)</option>
+          <option value="280">280 Hz (Duke II)</option>
+        </select>
+      </label>
+      <label class="opl-only">
+        <input id="loop" type="checkbox" />
+        Loop
+      </label>
+      <label class="psid-only">
+        Subsong:
+        <select id="subsong" disabled></select>
+      </label>
+    </div>
+
+    <div class="row">
+      <button id="play" disabled>Play</button>
+      <button id="pause" disabled>Pause</button>
+      <button id="stop" disabled>Stop</button>
+    </div>
+
+    <div class="progress-row">
+      <span class="time-elapsed" id="progress-elapsed">0:00</span>
+      <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+      <span class="time-total" id="progress-total">—</span>
+    </div>
+
+    <div class="status" id="status">idle — pick a file to begin</div>
+
+    <dl class="meta" id="meta" hidden>
+      <dt>Format</dt><dd id="meta-format">—</dd>
+      <dt>Container</dt><dd id="meta-container">—</dd>
+      <dt>Variant</dt><dd id="meta-variant">—</dd>
+      <dt>Title</dt><dd id="meta-title">—</dd>
+      <dt>Author</dt><dd id="meta-author">—</dd>
+      <dt>Notes</dt><dd id="meta-notes">—</dd>
+      <dt>Detail</dt><dd id="meta-detail">—</dd>
+    </dl>
+
+    <h2>Per-voice oscilloscope</h2>
+    <p style="color: #666; font-size: 0.9rem; margin-top: -0.25rem">
+      Voice count and layout adapt to the active format: 18 OPL3 channels, 3–9 SID voices.
+    </p>
+    <div id="scope" class="scope-grid"></div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
