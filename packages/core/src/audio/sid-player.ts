@@ -147,7 +147,7 @@ export class SidPlayer {
     };
   }
 
-  async resume(): Promise<void> {
+  async resumeAudio(): Promise<void> {
     if (this.ctx.state === 'suspended') {
       await this.ctx.resume();
     }

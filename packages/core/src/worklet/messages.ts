@@ -99,4 +99,24 @@ export interface ChannelsMessage {
   numFrames: number;
 }
 
-export type FromWorkletMessage = ReadyMessage | ErrorMessage | ChannelsMessage;
+/** Progress tick — throttled to ~20 Hz on the worklet side. */
+export interface ProgressMessage {
+  type: 'progress';
+  currentTimeSec: number;
+  durationSec: number | null;
+}
+
+/**
+ * Fired exactly once per loaded stream when the sequencer exhausts the
+ * event list and runs past the final tick. Non-looping streams only.
+ */
+export interface EndedMessage {
+  type: 'ended';
+}
+
+export type FromWorkletMessage =
+  | ReadyMessage
+  | ErrorMessage
+  | ChannelsMessage
+  | ProgressMessage
+  | EndedMessage;

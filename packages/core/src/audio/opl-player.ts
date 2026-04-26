@@ -2,6 +2,7 @@ import type { OplRegisterWrite } from '../chip/types.js';
 import type { RegisterEventStream, RegisterStreamTiming } from '../sequencer/types.js';
 import { OPL_PROCESSOR_NAME } from '../worklet/opl-processor-name.js';
 import type { FromWorkletMessage, ToWorkletMessage } from '../worklet/messages.js';
+import { Player, type OplPlayerInfo } from './player.js';
 
 export interface OplPlayerOptions {
   /** URL to the bundled worklet script (dist/worklet/opl-processor.js). */
@@ -10,6 +11,21 @@ export interface OplPlayerOptions {
   wasmUrl: string | URL;
   /** Optional existing AudioContext. If omitted, the player creates one. */
   audioContext?: AudioContext;
+}
+
+/**
+ * Optional metadata to attach to the loaded stream. Surfaced via the
+ * player's `info` getter so a generic UI can show title/composer/etc.
+ * without knowing what container the bytes came from. CawtoothPlayer.load()
+ * fills these in from the parsed song; standalone callers can pass them
+ * explicitly or omit them entirely (defaults are empty strings).
+ */
+export interface OplLoadStreamMetadata {
+  container?: 'imf' | 'dro' | 'herad' | 'unknown';
+  variant?: string;
+  title?: string;
+  source?: string;
+  remarks?: string;
 }
 
 /**
@@ -31,14 +47,35 @@ export type ChannelsListener = (data: Float32Array, numFrames: number) => void;
  * fetch and compile the wasm, ship the compiled module into the worklet,
  * and wait for it to report ready.
  */
-export class OplPlayer {
-  private readonly channelListeners = new Set<ChannelsListener>();
+export class OplPlayer extends Player {
+  /**
+   * Cached info for the most recent loadStream call. Starts as an empty
+   * shell so `info` is always defined; gets filled in once a stream is
+   * loaded. The mutable shape is internal — callers see a readonly view.
+   */
+  private _info: {
+    -readonly [K in keyof OplPlayerInfo]: OplPlayerInfo[K];
+  } = {
+    format: 'opl',
+    container: 'unknown',
+    variant: '',
+    title: '',
+    source: '',
+    remarks: '',
+    tickRate: 0,
+    events: 0,
+    loop: false,
+  };
 
-  private constructor(
-    private readonly ctx: AudioContext,
-    private readonly ownsContext: boolean,
-    private readonly node: AudioWorkletNode,
-  ) {
+  /** Current cached time / duration from the worklet's progress ticks. */
+  private currentTimeSec = 0;
+  private durationSec: number | null = null;
+  private playing = false;
+  /** Latches `ended` so we don't re-fire across listener-set churn. */
+  private endedFired = false;
+
+  private constructor(ctx: AudioContext, ownsContext: boolean, node: AudioWorkletNode) {
+    super(ctx, ownsContext, node);
     this.installMessageDispatcher();
   }
 
@@ -98,13 +135,24 @@ export class OplPlayer {
     return new OplPlayer(ctx, ownsContext, node);
   }
 
-  get audioContext(): AudioContext {
-    return this.ctx;
+  get format(): 'opl' {
+    return 'opl';
   }
 
-  /** The worklet node. Route this wherever you like (analyser, gain, destination). */
-  get output(): AudioWorkletNode {
-    return this.node;
+  get info(): OplPlayerInfo {
+    return this._info;
+  }
+
+  get currentTime(): number {
+    return this.currentTimeSec;
+  }
+
+  get duration(): number | null {
+    return this.durationSec;
+  }
+
+  get isPlaying(): boolean {
+    return this.playing;
   }
 
   writeRegister(reg: number, value: number): void {
@@ -128,28 +176,49 @@ export class OplPlayer {
    *
    * The stream's typed arrays are structured-cloned across to the worklet, so
    * the caller's copy remains usable after this returns.
+   *
+   * `metadata` populates `info` so a UI can render title/composer/etc.
+   * without knowing the source format. Defaults are empty strings.
    */
-  loadStream(stream: RegisterEventStream, timing: RegisterStreamTiming): void {
+  loadStream(
+    stream: RegisterEventStream,
+    timing: RegisterStreamTiming,
+    metadata?: OplLoadStreamMetadata,
+  ): void {
     const msg: ToWorkletMessage = { type: 'loadStream', stream, timing };
     this.node.port.postMessage(msg);
+
+    this._info.container = metadata?.container ?? 'unknown';
+    this._info.variant = metadata?.variant ?? '';
+    this._info.title = metadata?.title ?? '';
+    this._info.source = metadata?.source ?? '';
+    this._info.remarks = metadata?.remarks ?? '';
+    this._info.tickRate = timing.tickRate;
+    this._info.events = stream.regs.length;
+    this._info.loop = timing.loop ?? false;
+
+    // A new stream resets time + clears the ended latch.
+    this.currentTimeSec = 0;
+    this.durationSec = null;
+    this.endedFired = false;
+    this.playing = false;
   }
 
-  /** Begin / resume sequencer playback. */
   play(): void {
-    const msg: ToWorkletMessage = { type: 'play' };
-    this.node.port.postMessage(msg);
+    this.node.port.postMessage({ type: 'play' } satisfies ToWorkletMessage);
+    this.playing = true;
   }
 
-  /** Halt sequencer time advancement. Chip state is preserved. */
   pause(): void {
-    const msg: ToWorkletMessage = { type: 'pause' };
-    this.node.port.postMessage(msg);
+    this.node.port.postMessage({ type: 'pause' } satisfies ToWorkletMessage);
+    this.playing = false;
   }
 
-  /** Stop sequencer, rewind to the start, and silence the chip. */
   stop(): void {
-    const msg: ToWorkletMessage = { type: 'stop' };
-    this.node.port.postMessage(msg);
+    this.node.port.postMessage({ type: 'stop' } satisfies ToWorkletMessage);
+    this.playing = false;
+    this.currentTimeSec = 0;
+    this.endedFired = false;
   }
 
   /**
@@ -175,25 +244,6 @@ export class OplPlayer {
     };
   }
 
-  async resume(): Promise<void> {
-    if (this.ctx.state === 'suspended') {
-      await this.ctx.resume();
-    }
-  }
-
-  async dispose(): Promise<void> {
-    this.channelListeners.clear();
-    try {
-      this.node.disconnect();
-    } catch {
-      // Already disconnected — ignore.
-    }
-    this.node.port.close();
-    if (this.ownsContext) {
-      await this.ctx.close();
-    }
-  }
-
   private installMessageDispatcher(): void {
     // Replaces the init-time onmessage handler (which only cared about
     // ready/error). From here on, the port carries channel-tap data and any
@@ -205,6 +255,27 @@ export class OplPlayer {
           for (const cb of this.channelListeners) {
             cb(msg.data, msg.numFrames);
           }
+          return;
+        }
+        case 'progress': {
+          this.currentTimeSec = msg.currentTimeSec;
+          this.durationSec = msg.durationSec;
+          const info = {
+            currentTimeSec: msg.currentTimeSec,
+            durationSec: msg.durationSec,
+          };
+          for (const cb of this.progressListeners) cb(info);
+          return;
+        }
+        case 'ended': {
+          if (this.endedFired) return;
+          this.endedFired = true;
+          // Note: `playing` is intentionally NOT flipped here. The chip
+          // may still be sustaining notes from the last events, and the
+          // user may want to keep audio flowing (e.g. so a tail-out is
+          // captured) until they explicitly pause/stop. `ended` is a
+          // signal, not a state transition.
+          for (const cb of this.endedListeners) cb();
           return;
         }
         case 'error': {

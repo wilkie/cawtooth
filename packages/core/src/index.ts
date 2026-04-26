@@ -72,6 +72,8 @@ export type {
 export { OplPlayer } from './audio/opl-player.js';
 export type { ChannelsListener, OplPlayerOptions } from './audio/opl-player.js';
 
+export type { EndedListener, ProgressInfo, ProgressListener } from './audio/player-events.js';
+
 export { SidPlayer } from './audio/sid-player.js';
 export type { SidPlayerOptions } from './audio/sid-player.js';
 
@@ -130,7 +132,19 @@ export {
 export type { SidplayExports } from './formats/psid/sidplay-loader.js';
 
 export { PsidPlayer } from './audio/psid-player.js';
-export type { PsidPlayerCreateOptions, PsidPlaybackInfo } from './audio/psid-player.js';
+export type { PsidPlayerCreateOptions } from './audio/psid-player.js';
+
+export { Player } from './audio/player.js';
+export type { OplPlayerInfo, PlayerInfo, PsidPlayerInfo } from './audio/player.js';
+export type { OplLoadStreamMetadata } from './audio/opl-player.js';
+
+export { CawtoothPlayer, detectFormat } from './audio/cawtooth-player.js';
+export type {
+  CawtoothFormatConfig,
+  CawtoothLoadOptions,
+  CawtoothPlayerOptions,
+  DetectedFormat,
+} from './audio/cawtooth-player.js';
 
 export { PSID_PROCESSOR_NAME } from './worklet/psid-processor-name.js';
 export type {

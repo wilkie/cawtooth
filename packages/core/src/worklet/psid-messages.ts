@@ -32,14 +32,26 @@ export interface PsidSelectSongMessage {
   subsong: number;
 }
 
-/** Stop playback (silence the chip + hold the CPU). */
-export interface PsidStopMessage {
-  type: 'stop';
+/** Begin / resume playback. After init, no audio is produced until this fires. */
+export interface PsidPlayMessage {
+  type: 'play';
 }
 
-/** Resume playback after a stop. */
-export interface PsidResumeMessage {
-  type: 'resume';
+/**
+ * Halt audio production while preserving CPU + SID state. `currentTime`
+ * stops advancing; a subsequent `play` resumes from the same point.
+ */
+export interface PsidPauseMessage {
+  type: 'pause';
+}
+
+/**
+ * Halt and rewind: re-runs the tune's init routine on the current subsong
+ * (resetting the CPU emulator) and resets the SID chip. `currentTime`
+ * goes back to 0. Audio stays silent until `play` fires again.
+ */
+export interface PsidStopMessage {
+  type: 'stop';
 }
 
 /** Begin emitting per-voice PCM taps via PsidChannelsMessage once per block. */
@@ -52,13 +64,25 @@ export interface PsidUnsubscribeChannelsMessage {
   type: 'unsubscribeChannels';
 }
 
+/**
+ * Set (or clear) the known duration for the current subsong. The worklet
+ * uses this to fire a one-shot `ended` message once elapsed time passes
+ * the threshold. Pass `null` to suppress end-detection (the default).
+ */
+export interface PsidSetDurationMessage {
+  type: 'setDuration';
+  durationSec: number | null;
+}
+
 export type ToPsidWorkletMessage =
   | PsidInitMessage
   | PsidSelectSongMessage
+  | PsidPlayMessage
+  | PsidPauseMessage
   | PsidStopMessage
-  | PsidResumeMessage
   | PsidSubscribeChannelsMessage
-  | PsidUnsubscribeChannelsMessage;
+  | PsidUnsubscribeChannelsMessage
+  | PsidSetDurationMessage;
 
 /** Fired once the worklet has parsed the PSID, loaded the tune, and run init. */
 export interface PsidReadyMessage {
@@ -90,7 +114,7 @@ export interface PsidErrorMessage {
  * Per-voice PCM block, emitted by the worklet once per process() call
  * while at least one subscriber is active. `data` is a fresh Float32Array
  * transferred into the main thread; layout is frame-interleaved
- * `[f0_v0, f0_v1, f0_v2, f1_v0, ...]`, length `numFrames * 3`.
+ * `[f0_v0, f0_v1, f0_v2, f1_v0, ...]`, length `numFrames * 9`.
  */
 export interface PsidChannelsMessage {
   type: 'channels';
@@ -98,4 +122,21 @@ export interface PsidChannelsMessage {
   numFrames: number;
 }
 
-export type FromPsidWorkletMessage = PsidReadyMessage | PsidErrorMessage | PsidChannelsMessage;
+/** Progress tick — throttled to ~20 Hz on the worklet side. */
+export interface PsidProgressMessage {
+  type: 'progress';
+  currentTimeSec: number;
+  durationSec: number | null;
+}
+
+/** Fired once per subsong when the caller-supplied duration has elapsed. */
+export interface PsidEndedMessage {
+  type: 'ended';
+}
+
+export type FromPsidWorkletMessage =
+  | PsidReadyMessage
+  | PsidErrorMessage
+  | PsidChannelsMessage
+  | PsidProgressMessage
+  | PsidEndedMessage;

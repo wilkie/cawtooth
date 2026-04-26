@@ -180,6 +180,39 @@ describe('RegisterSequencer', () => {
     chip.dispose();
   });
 
+  it('isFinished flips true when non-looping playback runs past the final tick', () => {
+    const chip = makeChip();
+    const seq = new RegisterSequencer(chip);
+    const stream = makeStream([
+      [0x20, 0x01, 0],
+      [0xa0, 0x41, 100],
+    ]);
+    seq.loadStream(stream, { tickRate: TICK_RATE });
+
+    // Before play, nothing is considered finished.
+    expect(seq.isFinished).toBe(false);
+
+    seq.play();
+    // 100 ticks @ 700/s = ~143 ms. Render a bit more than that.
+    seq.generate(new Float32Array(Math.ceil(SAMPLE_RATE * 0.2) * 2));
+    expect(seq.isFinished).toBe(true);
+    chip.dispose();
+  });
+
+  it('isFinished stays false when the stream is looping', () => {
+    const chip = makeChip();
+    const seq = new RegisterSequencer(chip);
+    const stream = makeStream([
+      [0x20, 0x01, 0],
+      [0xa0, 0x41, 100],
+    ]);
+    seq.loadStream(stream, { tickRate: TICK_RATE, loop: true });
+    seq.play();
+    seq.generate(new Float32Array(Math.ceil(SAMPLE_RATE * 0.5) * 2));
+    expect(seq.isFinished).toBe(false);
+    chip.dispose();
+  });
+
   it('rejects a stream whose parallel arrays disagree in length', () => {
     const chip = makeChip();
     const seq = new RegisterSequencer(chip);

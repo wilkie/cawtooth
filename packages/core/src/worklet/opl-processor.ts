@@ -5,11 +5,18 @@ import { RegisterSequencer } from '../sequencer/register-sequencer.js';
 import type { ToWorkletMessage, FromWorkletMessage } from './messages.js';
 import { OPL_PROCESSOR_NAME } from './opl-processor-name.js';
 
+/** Minimum seconds between consecutive `progress` messages. */
+const PROGRESS_INTERVAL_SEC = 1 / 20;
+
 class CawtoothOplProcessor extends AudioWorkletProcessor {
   private chip: NukedOpl3Chip | null = null;
   private sequencer: RegisterSequencer | null = null;
   private interleaved: Float32Array | null = null;
   private channelsSubscribed = false;
+  /** Latches the `ended` edge so we only post it once per loaded stream. */
+  private endedFired = false;
+  /** Elapsed time at the last `progress` we posted. */
+  private lastProgressAtSec = 0;
 
   constructor() {
     super();
@@ -59,6 +66,8 @@ class CawtoothOplProcessor extends AudioWorkletProcessor {
       }
       case 'loadStream': {
         this.sequencer?.loadStream(msg.stream, msg.timing);
+        this.endedFired = false;
+        this.lastProgressAtSec = 0;
         return;
       }
       case 'play': {
@@ -71,6 +80,8 @@ class CawtoothOplProcessor extends AudioWorkletProcessor {
       }
       case 'stop': {
         this.sequencer?.stop();
+        this.endedFired = false;
+        this.lastProgressAtSec = 0;
         return;
       }
       case 'subscribeChannels': {
@@ -115,6 +126,27 @@ class CawtoothOplProcessor extends AudioWorkletProcessor {
       left[i] = stereoScratch[j];
       right[i] = stereoScratch[j + 1];
     }
+
+    // Progress / ended signalling. Only tick when the sequencer is
+    // actually playing — paused time shouldn't advance `currentTime` or
+    // cross the end boundary.
+    if (this.sequencer.isPlaying) {
+      const currentTimeSec = this.sequencer.currentTime;
+      const durationSec = this.sequencer.duration;
+      if (currentTimeSec - this.lastProgressAtSec >= PROGRESS_INTERVAL_SEC) {
+        this.post({
+          type: 'progress',
+          currentTimeSec,
+          durationSec: durationSec > 0 ? durationSec : null,
+        });
+        this.lastProgressAtSec = currentTimeSec;
+      }
+      if (!this.endedFired && this.sequencer.isFinished) {
+        this.endedFired = true;
+        this.post({ type: 'ended' });
+      }
+    }
+
     return true;
   }
 }

@@ -98,7 +98,7 @@ playBtn.addEventListener('click', async () => {
     const model = modelSel.value as SidChipModel;
     const waveform = waveformSel.value as Waveform;
     const p = await ensurePlayer(model);
-    await p.resume();
+    await p.resumeAudio();
     p.reset();
     p.writeRegisters(programTone(waveform, 440));
     setStatus(`playing — ${waveform} A4 on voice 1 (${model})`);

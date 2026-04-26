@@ -40,7 +40,7 @@ async function ensurePlayer(): Promise<OplPlayer> {
 playBtn.addEventListener('click', async () => {
   try {
     const p = await ensurePlayer();
-    await p.resume();
+    await p.resumeAudio();
     p.reset();
     p.writeRegisters(TEST_TONE);
     setStatus('playing — sustained tone on channel 0');

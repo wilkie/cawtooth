@@ -6,11 +6,31 @@ import type {
 } from './psid-messages.js';
 import { PSID_PROCESSOR_NAME } from './psid-processor-name.js';
 
+/** Minimum seconds between consecutive `progress` messages. */
+const PROGRESS_INTERVAL_SEC = 1 / 20;
+
 class CawtoothPsidProcessor extends AudioWorkletProcessor {
   private tune: SidTune | null = null;
   private interleaved: Float32Array | null = null;
-  private playing = true;
+  /**
+   * False after init/stop until the main thread sends `play`. Matches the
+   * OPL worklet model so `Player.play()` works the same across formats.
+   */
+  private playing = false;
+  /**
+   * Active subsong tracked here so `stop` can re-run the tune's init
+   * routine without the main thread re-sending the subsong number.
+   */
+  private currentSubsong: number | null = null;
   private channelsSubscribed = false;
+  /** Samples produced since the current subsong was initialized. */
+  private samplesSinceInit = 0;
+  /** Caller-supplied duration in seconds, or null for "unknown / don't detect end". */
+  private durationSec: number | null = null;
+  /** Suppresses repeat `ended` messages for a subsong that overruns its duration. */
+  private endedFired = false;
+  /** Last elapsed-time value we posted a progress message at. */
+  private lastProgressAtSec = 0;
 
   constructor() {
     super();
@@ -40,7 +60,9 @@ class CawtoothPsidProcessor extends AudioWorkletProcessor {
           });
           const subsong = msg.subsong ?? msg.song.startSong;
           this.tune.initSong(subsong);
-          this.playing = true;
+          this.currentSubsong = subsong;
+          this.playing = false;
+          this.resetProgress();
           this.post({
             type: 'ready',
             name: msg.song.name,
@@ -63,7 +85,10 @@ class CawtoothPsidProcessor extends AudioWorkletProcessor {
       case 'selectSong': {
         try {
           this.tune?.initSong(msg.subsong);
-          this.playing = true;
+          this.currentSubsong = msg.subsong;
+          // `playing` is intentionally preserved: switching subsongs while
+          // active continues to play; switching while paused stays paused.
+          this.resetProgress();
         } catch (err) {
           this.post({
             type: 'error',
@@ -72,14 +97,36 @@ class CawtoothPsidProcessor extends AudioWorkletProcessor {
         }
         return;
       }
-      case 'stop': {
-        this.playing = false;
-        // Reset the SID so the chip is silent while we're stopped.
-        this.tune?.resetSid();
+      case 'play': {
+        this.playing = true;
         return;
       }
-      case 'resume': {
-        this.playing = true;
+      case 'pause': {
+        // Halt time without disturbing chip / CPU state. The processor
+        // emits silence while paused (see process()) but a subsequent
+        // `play` resumes from exactly where we left off.
+        this.playing = false;
+        return;
+      }
+      case 'stop': {
+        try {
+          this.playing = false;
+          if (this.tune && this.currentSubsong !== null) {
+            // Re-running init rewinds the CPU emulator and the tune's
+            // internal state to the start of the active subsong. The
+            // tune's init routine usually clears SID registers, but we
+            // also explicitly reset to be safe (some tunes leave a
+            // pre-existing waveform key-on intact across init).
+            this.tune.initSong(this.currentSubsong);
+            this.tune.resetSid();
+          }
+          this.resetProgress();
+        } catch (err) {
+          this.post({
+            type: 'error',
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
         return;
       }
       case 'subscribeChannels': {
@@ -90,7 +137,22 @@ class CawtoothPsidProcessor extends AudioWorkletProcessor {
         this.channelsSubscribed = false;
         return;
       }
+      case 'setDuration': {
+        this.durationSec = msg.durationSec;
+        // New duration may mean a previously-ended subsong isn't
+        // considered ended anymore (e.g. caller extended it). Reset
+        // the latch so `ended` can fire again if/when we pass the new
+        // threshold.
+        this.endedFired = false;
+        return;
+      }
     }
+  }
+
+  private resetProgress(): void {
+    this.samplesSinceInit = 0;
+    this.lastProgressAtSec = 0;
+    this.endedFired = false;
   }
 
   process(_inputs: Float32Array[][], outputs: Float32Array[][]): boolean {
@@ -130,6 +192,29 @@ class CawtoothPsidProcessor extends AudioWorkletProcessor {
       left[i] = scratch[j];
       right[i] = scratch[j + 1];
     }
+
+    // Advance elapsed-time counter and emit progress / ended events.
+    // Only counts while actively playing — paused time doesn't drain the
+    // duration budget.
+    this.samplesSinceInit += numFrames;
+    const elapsedSec = this.samplesSinceInit / sampleRate;
+    if (elapsedSec - this.lastProgressAtSec >= PROGRESS_INTERVAL_SEC) {
+      this.post({
+        type: 'progress',
+        currentTimeSec: elapsedSec,
+        durationSec: this.durationSec,
+      });
+      this.lastProgressAtSec = elapsedSec;
+    }
+    if (
+      !this.endedFired &&
+      this.durationSec !== null &&
+      elapsedSec >= this.durationSec
+    ) {
+      this.endedFired = true;
+      this.post({ type: 'ended' });
+    }
+
     return true;
   }
 }

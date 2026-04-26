@@ -1,5 +1,6 @@
 import type { SidChipModel, SidSamplingMethod } from '../chip/resid-sid.js';
 import type { ChannelsListener } from './opl-player.js';
+import { Player, type PsidPlayerInfo } from './player.js';
 import { parsePsid } from '../formats/psid/parser.js';
 import type { PsidSong } from '../formats/psid/types.js';
 import { PSID_PROCESSOR_NAME } from '../worklet/psid-processor-name.js';
@@ -33,35 +34,38 @@ export interface PsidPlayerCreateOptions {
   subsong?: number;
 }
 
-/** Metadata and active-subsong info surfaced from the PSID header on ready. */
-export interface PsidPlaybackInfo {
-  name: string;
-  author: string;
-  released: string;
-  songs: number;
-  subsong: number;
-  model: SidChipModel;
-  clockFrequency: number;
-  /** CPU cycles between play-routine calls (vblank or CIA-driven). */
-  playInterval: number;
-}
-
 /**
  * Main-thread handle for PSID playback through the sidplay AudioWorklet.
  *
- * Parallel to OplPlayer / SidPlayer: registers the worklet module, fetches
- * + transfers the wasm bytes and the .sid bytes, waits for the worklet to
- * finish parsing and initializing the tune, then surfaces the metadata.
+ * Like every cawtooth player, the player is **paused-at-zero** after
+ * `create()` returns. The caller must call `play()` to start audio. This
+ * matches `OplPlayer` and `CawtoothPlayer.load()` so a generic UI can
+ * always issue the same `resumeAudio() → play()` sequence on a user gesture.
  */
-export class PsidPlayer {
-  private readonly channelListeners = new Set<ChannelsListener>();
+export class PsidPlayer extends Player {
+  /**
+   * Mutable internal copy of the playback info. The public `info` getter
+   * exposes a readonly view. `subsong` is updated on `selectSong`; the
+   * other fields are immutable for the life of the player (they describe
+   * the loaded tune, which doesn't change without disposing + recreating).
+   */
+  private readonly _info: {
+    -readonly [K in keyof PsidPlayerInfo]: PsidPlayerInfo[K];
+  };
+
+  private currentTimeSec = 0;
+  private durationSec: number | null = null;
+  private playing = false;
+  private endedFired = false;
 
   private constructor(
-    private readonly ctx: AudioContext,
-    private readonly ownsContext: boolean,
-    private readonly node: AudioWorkletNode,
-    readonly info: PsidPlaybackInfo,
+    ctx: AudioContext,
+    ownsContext: boolean,
+    node: AudioWorkletNode,
+    info: PsidPlayerInfo,
   ) {
+    super(ctx, ownsContext, node);
+    this._info = { ...info };
     this.installMessageDispatcher();
   }
 
@@ -134,7 +138,8 @@ export class PsidPlayer {
     node.port.postMessage(initMsg, [wasmBytes]);
 
     const ready_ = await ready;
-    const info: PsidPlaybackInfo = {
+    const info: PsidPlayerInfo = {
+      format: 'psid',
       name: ready_.name,
       author: ready_.author,
       released: ready_.released,
@@ -147,18 +152,31 @@ export class PsidPlayer {
     return new PsidPlayer(ctx, ownsContext, node, info);
   }
 
-  get audioContext(): AudioContext {
-    return this.ctx;
+  get format(): 'psid' {
+    return 'psid';
   }
 
-  get output(): AudioWorkletNode {
-    return this.node;
+  get info(): PsidPlayerInfo {
+    return this._info;
+  }
+
+  get currentTime(): number {
+    return this.currentTimeSec;
+  }
+
+  get duration(): number | null {
+    return this.durationSec;
+  }
+
+  get isPlaying(): boolean {
+    return this.playing;
   }
 
   /**
    * Switch to a different subsong (1-based). Updates `info.subsong` so
-   * consumers reading the field see current state rather than whichever
-   * subsong the player started on.
+   * consumers reading the field see current state. Preserves the
+   * `playing` / `paused` state — switching while playing keeps playing,
+   * switching while paused stays paused.
    *
    * Note: `info.playInterval` is NOT re-queried from the worklet after a
    * subsong change, even though CIA-speed subsongs can have different
@@ -169,23 +187,42 @@ export class PsidPlayer {
   selectSong(subsong: number): void {
     const msg: ToPsidWorkletMessage = { type: 'selectSong', subsong };
     this.node.port.postMessage(msg);
-    this.info.subsong = subsong;
+    this._info.subsong = subsong;
+    this.currentTimeSec = 0;
+    this.endedFired = false;
   }
 
-  /** Halt playback and silence the chip. */
+  play(): void {
+    this.node.port.postMessage({ type: 'play' } satisfies ToPsidWorkletMessage);
+    this.playing = true;
+  }
+
+  pause(): void {
+    this.node.port.postMessage({ type: 'pause' } satisfies ToPsidWorkletMessage);
+    this.playing = false;
+  }
+
   stop(): void {
-    const msg: ToPsidWorkletMessage = { type: 'stop' };
-    this.node.port.postMessage(msg);
+    this.node.port.postMessage({ type: 'stop' } satisfies ToPsidWorkletMessage);
+    this.playing = false;
+    this.currentTimeSec = 0;
+    this.endedFired = false;
   }
 
   /**
-   * Resume playback after stop. Note: this doesn't re-run init, so the
-   * tune picks up from wherever its play routine's internal state was.
-   * For a true restart, call `selectSong(currentSubsong)` instead.
+   * Tell the worklet how long the currently-initialized subsong is (in
+   * seconds). The worklet fires `ended` once elapsed audio reaches this
+   * threshold. Pass `null` to clear — the most common case being "HVSC
+   * Songlengths isn't loaded yet, so we don't know".
+   *
+   * Idempotent; overwrites any previous value.
    */
-  resume(): void {
-    const msg: ToPsidWorkletMessage = { type: 'resume' };
-    this.node.port.postMessage(msg);
+  setSubsongDurationSec(sec: number | null): void {
+    this.node.port.postMessage({ type: 'setDuration', durationSec: sec });
+    this.durationSec = sec;
+    // A new duration may "uncross" the end boundary — let `ended` fire
+    // again if/when the new threshold is reached.
+    this.endedFired = false;
   }
 
   /**
@@ -196,9 +233,10 @@ export class PsidPlayer {
    * a fresh Float32 buffer per audio block and transfers it across —
    * cheap enough for scope / FFT visualization at the audio block rate.
    *
-   * `data` is 3 voices × numFrames, frame-interleaved:
-   * `[f0_v0, f0_v1, f0_v2, f1_v0, ...]`. Do not mutate — other
-   * subscribers observe the same buffer for that one call.
+   * `data` is 9 voices × numFrames, frame-interleaved:
+   * `[f0_sid1_v1, f0_sid1_v2, f0_sid1_v3, f0_sid2_v1, ..., f0_sid3_v3,
+   *   f1_sid1_v1, ...]`. Single-/dual-SID tunes zero-fill unused slots.
+   * Do not mutate — other subscribers observe the same buffer.
    */
   onChannels(listener: ChannelsListener): () => void {
     this.channelListeners.add(listener);
@@ -215,25 +253,6 @@ export class PsidPlayer {
     };
   }
 
-  async resumeAudio(): Promise<void> {
-    if (this.ctx.state === 'suspended') {
-      await this.ctx.resume();
-    }
-  }
-
-  async dispose(): Promise<void> {
-    this.channelListeners.clear();
-    try {
-      this.node.disconnect();
-    } catch {
-      // Already disconnected — ignore.
-    }
-    this.node.port.close();
-    if (this.ownsContext) {
-      await this.ctx.close();
-    }
-  }
-
   private installMessageDispatcher(): void {
     this.node.port.onmessage = (ev: MessageEvent<FromPsidWorkletMessage>) => {
       const msg = ev.data;
@@ -242,6 +261,22 @@ export class PsidPlayer {
           for (const cb of this.channelListeners) {
             cb(msg.data, msg.numFrames);
           }
+          return;
+        }
+        case 'progress': {
+          this.currentTimeSec = msg.currentTimeSec;
+          this.durationSec = msg.durationSec;
+          const info = {
+            currentTimeSec: msg.currentTimeSec,
+            durationSec: msg.durationSec,
+          };
+          for (const cb of this.progressListeners) cb(info);
+          return;
+        }
+        case 'ended': {
+          if (this.endedFired) return;
+          this.endedFired = true;
+          for (const cb of this.endedListeners) cb();
           return;
         }
         case 'error': {

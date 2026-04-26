@@ -103,6 +103,33 @@
         font-family: ui-monospace, Menlo, Consolas, monospace;
         text-align: center;
       }
+      .progress-row {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-top: 0.75rem;
+      }
+      .progress-bar {
+        flex: 1;
+        height: 6px;
+        background: #eaeaea;
+        border-radius: 3px;
+        overflow: hidden;
+      }
+      .progress-fill {
+        height: 100%;
+        background: #4a6cf7;
+        width: 0%;
+        transition: width 80ms linear;
+      }
+      .time-elapsed,
+      .time-total {
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: 0.85rem;
+        color: #666;
+        min-width: 3em;
+        text-align: center;
+      }
     </style>
   </head>
   <body>
@@ -134,6 +161,12 @@
       <button id="play" disabled>Play</button>
       <button id="pause" disabled>Pause</button>
       <button id="stop" disabled>Stop</button>
+    </div>
+
+    <div class="progress-row">
+      <span class="time-elapsed" id="progress-elapsed">0:00</span>
+      <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+      <span class="time-total" id="progress-total">—</span>
     </div>
 
     <div class="status" id="status">idle — choose a file to begin</div>

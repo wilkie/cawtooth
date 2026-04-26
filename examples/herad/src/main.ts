@@ -109,8 +109,12 @@ async function parseAndLoad(): Promise<void> {
     metadataEl.hidden = false;
 
     const p = await ensurePlayer();
-    await p.resume();
-    p.loadStream(stream.stream, { tickRate: stream.tickRate, loop: loopCheckbox.checked });
+    await p.resumeAudio();
+    p.loadStream(
+      stream.stream,
+      { tickRate: stream.tickRate, loop: loopCheckbox.checked },
+      { container: 'herad' },
+    );
 
     setControlsEnabled(true);
     setStatus(`loaded ${file.name}. Click Play.`);

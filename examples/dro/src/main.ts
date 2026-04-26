@@ -58,8 +58,12 @@ fileInput.addEventListener('change', async () => {
     metadataEl.hidden = false;
 
     const p = await ensurePlayer();
-    await p.resume();
-    p.loadStream(song.stream, { tickRate: song.tickRate, loop: loopCheckbox.checked });
+    await p.resumeAudio();
+    p.loadStream(
+      song.stream,
+      { tickRate: song.tickRate, loop: loopCheckbox.checked },
+      { container: 'dro', variant: song.variant },
+    );
 
     hasLoaded = true;
     setControlsEnabled();

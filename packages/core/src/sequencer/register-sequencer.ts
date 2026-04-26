@@ -97,6 +97,21 @@ export class RegisterSequencer {
     return this.loopSamples / this.chip.sampleRate;
   }
 
+  /**
+   * True once we've consumed every event and rendered past the stream's
+   * natural endpoint, for non-looping streams. Always false when `loop`
+   * is enabled (the stream never "ends" in that mode). Edge-triggers
+   * exactly when the render loop crosses the boundary; consumers that
+   * care about the moment should latch it themselves.
+   */
+  get isFinished(): boolean {
+    return (
+      !this.loop &&
+      this.eventIndex >= this.eventCount &&
+      this.currentSample >= this.loopSamples
+    );
+  }
+
   /** Fill `output` (stereo interleaved) with audio, firing events in sync. */
   generate(output: Float32Array): void {
     this.render(output.length >>> 1, (start, frames) => {

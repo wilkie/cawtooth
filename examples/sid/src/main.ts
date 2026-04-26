@@ -7,7 +7,8 @@ import {
   parsePsid,
   parseSongLengthsDb,
   renderSidTuneToWav,
-  type PsidPlaybackInfo,
+  type ProgressInfo,
+  type PsidPlayerInfo,
   type PsidSong,
   type SongLengths,
   type SongLengthsDb,
@@ -36,6 +37,9 @@ const downloadBtn = document.getElementById('download') as HTMLButtonElement;
 const downloadLengthSel = document.getElementById('download-length') as HTMLSelectElement;
 const songlengthsFile = document.getElementById('songlengths-file') as HTMLInputElement;
 const songlengthsStatus = document.getElementById('songlengths-status') as HTMLElement;
+const progressElapsed = document.getElementById('progress-elapsed') as HTMLElement;
+const progressTotal = document.getElementById('progress-total') as HTMLElement;
+const progressFill = document.getElementById('progress-fill') as HTMLElement;
 
 function labelForVoice(voiceIdx: number, sidCount: number): string {
   // For single-SID tunes label the three canvases as V1/V2/V3. For
@@ -99,6 +103,46 @@ function formatDuration(seconds: number): string {
   return `${m}:${s.toFixed(3).padStart(6, '0')}`;
 }
 
+function formatMmSs(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec - m * 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function updateProgress(info: ProgressInfo): void {
+  progressElapsed.textContent = formatMmSs(info.currentTimeSec);
+  if (info.durationSec !== null && info.durationSec > 0) {
+    progressTotal.textContent = formatMmSs(info.durationSec);
+    const pct = Math.min(100, (info.currentTimeSec / info.durationSec) * 100);
+    progressFill.style.width = `${pct}%`;
+  } else {
+    progressTotal.textContent = '—';
+    progressFill.style.width = '0%';
+  }
+}
+
+/**
+ * Determine the expected duration for the currently-initialized subsong
+ * from the loaded SongLengths database (if any) and push it to the
+ * worklet. Pushing `null` disables end detection — used when no DB is
+ * loaded or the tune isn't in it.
+ */
+function pushDurationToPlayer(): void {
+  if (!player || !currentSong) return;
+  if (!songlengthsDb) {
+    player.setSubsongDurationSec(null);
+    return;
+  }
+  const entry = lookupSongLengths(currentSong, songlengthsDb);
+  if (!entry) {
+    player.setSubsongDurationSec(null);
+    return;
+  }
+  const subsong = player.info.subsong;
+  const idx = Math.min(subsong - 1, entry.durations.length - 1);
+  player.setSubsongDurationSec(entry.durations[idx]);
+}
+
 function renderDuration(): void {
   if (!currentSong || !songlengthsDb) {
     metaDuration.textContent = songlengthsDb
@@ -120,7 +164,7 @@ function renderDuration(): void {
     `(all ${entry.count}: ${formatDuration(total)})`;
 }
 
-function renderMeta(info: PsidPlaybackInfo): void {
+function renderMeta(info: PsidPlayerInfo): void {
   metaTitle.textContent = info.name || '(unnamed)';
   metaAuthor.textContent = info.author || '(unknown)';
   metaReleased.textContent = info.released || '';
@@ -187,6 +231,10 @@ playBtn.addEventListener('click', async () => {
     });
     player.output.connect(player.audioContext.destination);
     await player.resumeAudio();
+    // PsidPlayer.create() returns a paused-at-zero player so the
+    // create flow matches OplPlayer + CawtoothPlayer.load(). The
+    // demo's "Play" button means "start now," so kick it off here.
+    player.play();
 
     // Rebuild the scope to match this tune's active-SID count (1, 2, or
     // 3). The worklet always emits a stride-9 per-voice buffer; the
@@ -202,6 +250,34 @@ playBtn.addEventListener('click', async () => {
     // player is alive.
     unsubscribeScope = player.onChannels(scope.ingest);
     scope.start();
+
+    // Progress bar follows the worklet's elapsed-time ticks. Reset to
+    // zero on each new player so we don't carry a stale value over from
+    // a previous tune.
+    updateProgress({ currentTimeSec: 0, durationSec: null });
+    player.onProgress(updateProgress);
+
+    // Auto-advance: when the HVSC-known duration elapses, jump to the
+    // next subsong (wrapping back to 1 at the end). Does nothing when
+    // no Songlengths DB is loaded (setSubsongDurationSec(null) keeps
+    // the worklet from ever firing `ended`).
+    player.onEnded(() => {
+      if (!player) return;
+      const info = player.info;
+      if (info.songs <= 1) {
+        setStatus(`finished — "${info.name}"`);
+        return;
+      }
+      const next = info.subsong >= info.songs ? 1 : info.subsong + 1;
+      player.selectSong(next);
+      // Mirror the dropdown so the UI reflects the change.
+      subsongSel.value = String(next);
+      // `player.info` is mutated inside selectSong; refresh downstream UI.
+      renderMeta(info);
+      pushDurationToPlayer();
+      setStatus(`auto-advanced — subsong ${next}/${info.songs}`);
+    });
+    pushDurationToPlayer();
 
     renderMeta(player.info);
     downloadBtn.disabled = false;
@@ -226,6 +302,7 @@ subsongSel.addEventListener('change', () => {
   const sub = Number(subsongSel.value);
   player.selectSong(sub);
   renderDuration();
+  pushDurationToPlayer();
   setStatus(`playing — subsong ${sub}/${player.info.songs}`);
 });
 
@@ -239,6 +316,9 @@ songlengthsFile.addEventListener('change', async () => {
     songlengthsDb = db;
     songlengthsStatus.textContent = `${db.size.toLocaleString()} entries loaded`;
     renderDuration();
+    // Now that we know the current tune's duration, tell the worklet so
+    // it can fire `ended` at the right moment.
+    pushDurationToPlayer();
   } catch (err) {
     songlengthsStatus.textContent = `error: ${err instanceof Error ? err.message : String(err)}`;
   }
