@@ -103,25 +103,27 @@ parsed `RegisterEventStream` — see `examples/sid` for a full download flow.
 
 ### Exporting to DRO
 
-Every OPL parser produces a format-agnostic `RegisterEventStream`, so any
-OPL source can be re-encoded as DRO v2. HSQ is decompressed transparently
-by `parseHerad`, then `renderHeradToStream` converts the song to a stream
-of OPL register writes that `encodeDro` serializes.
+Every OPL parser produces a format-agnostic `TimedRegisterStream`, and
+`parseOpl` is the unified entry point that auto-detects the source
+format and dispatches to the right parser/renderer. HSQ/SQX wrappers are
+decompressed transparently. Once you have the stream, hand it to any
+OPL encoder.
 
 ```ts
-import { parseHerad, renderHeradToStream, encodeDro } from 'cawtooth';
+import { parseOpl, encodeDro } from 'cawtooth';
 import { writeFile } from 'node:fs/promises';
 
-const song = parseHerad(new Uint8Array(hsqBytes)); // handles HSQ / SQX wrappers
-const timed = renderHeradToStream(song); // → TimedRegisterStream
-const droBytes = encodeDro(timed); // hardware auto-detected
+const stream = parseOpl(new Uint8Array(hsqBytes));
+if (!stream) throw new Error('not an OPL format');
 
+const droBytes = encodeDro(stream); // hardware auto-detected
 await writeFile('out.dro', droBytes);
 ```
 
-The same pattern works in reverse for IMF (`parseImf` + `encodeImf`) and
-between any pair of OPL formats — they all share the `RegisterEventStream`
-representation.
+The same `stream` re-encodes to IMF (`encodeImf(stream, { ... })`),
+plays through `OplPlayer.loadStream(stream.stream, { tickRate: stream.tickRate })`,
+or accepts in-between transformations like `dedupRegisterEventStream`
+before encoding.
 
 ## Development
 

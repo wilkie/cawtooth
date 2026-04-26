@@ -133,6 +133,9 @@ export type {
   DetectedFormat,
 } from './audio/cawtooth-player.js';
 
+export { parseOpl } from './transcode.js';
+export type { ParseOplFormat, ParseOplOptions } from './transcode.js';
+
 export { PSID_PROCESSOR_NAME } from './worklet/psid-processor-name.js';
 export type {
   FromPsidWorkletMessage,
