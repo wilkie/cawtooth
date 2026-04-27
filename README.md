@@ -155,6 +155,7 @@ Vite dev server on a fixed port):
 pnpm --filter @cawtooth-examples/player dev    # universal player demo
 pnpm --filter @cawtooth-examples/imf dev       # IMF / WLF demo
 pnpm --filter @cawtooth-examples/sid dev       # PSID / RSID demo
+pnpm --filter @cawtooth-examples/ay dev        # PSG / VTX / YM player demo
 pnpm --filter @cawtooth-examples/ay-tone dev   # AY-3-8910 / YM2149 chord demo
 # …also: dro, herad, sid-tone, tone
 ```

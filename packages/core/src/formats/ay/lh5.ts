@@ -61,15 +61,6 @@ class BitReader {
     this.bitCount -= n;
     return result;
   }
-
-  peekBit(): number {
-    if (this.bitCount < 1) {
-      const byte = this.bytePos < this.bytes.length ? this.bytes[this.bytePos++] : 0;
-      this.bitBuffer = ((this.bitBuffer << 8) | byte) >>> 0;
-      this.bitCount += 8;
-    }
-    return (this.bitBuffer >>> (this.bitCount - 1)) & 1;
-  }
 }
 
 /**
@@ -246,10 +237,13 @@ function readBitLengths(
     let c = reader.readBits(3);
     if (c === 7) {
       // 3 bits couldn't represent the length — extend with as many 1s as
-      // it takes to reach the actual value. Cap at MAX_HUFF_BITS so a
-      // corrupt stream can't loop forever.
-      while (reader.peekBit() === 1) {
-        reader.readBits(1);
+      // it takes to reach the actual value, then consume the terminating
+      // 0. The trailing zero is part of the encoding, NOT a peek-and-stop
+      // sentinel; LHA's reference encoder spends `c - 3` bits *after* the
+      // initial 3 (including that terminator), so a decoder that doesn't
+      // eat the 0 here ends up off-by-one on every length ≥ 7. Cap at
+      // MAX_HUFF_BITS so a corrupt stream can't loop forever.
+      while (reader.readBits(1) === 1) {
         c++;
         if (c > MAX_HUFF_BITS) {
           throw new Error('cawtooth/lh5: bit length escape exceeded MAX_HUFF_BITS');

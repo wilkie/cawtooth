@@ -8,8 +8,10 @@ import {
 } from 'cawtooth';
 import oplWorkletUrl from 'cawtooth/worklet/opl?url';
 import psidWorkletUrl from 'cawtooth/worklet/psid?url';
+import ayWorkletUrl from 'cawtooth/worklet/ay?url';
 import oplWasmUrl from 'cawtooth/wasm/nuked-opl3.wasm?url';
 import psidWasmUrl from 'cawtooth/wasm/sidplay.wasm?url';
+import ayumiWasmUrl from 'cawtooth/wasm/ayumi.wasm?url';
 
 import { createOscilloscope, type Oscilloscope } from './oscilloscope.js';
 
@@ -113,7 +115,7 @@ function renderMeta(p: Player): void {
     metaAuthor.textContent = info.source || '—';
     metaNotes.textContent = info.remarks || '—';
     metaDetail.textContent = `${info.events.toLocaleString()} events @ ${info.tickRate} Hz${info.loop ? ' (looping)' : ''}`;
-  } else {
+  } else if (info.format === 'psid') {
     metaContainer.textContent = 'PSID/RSID';
     metaVariant.textContent = info.songs > 1 ? `${info.songs} subsongs` : 'single song';
     metaTitle.textContent = info.name || '—';
@@ -123,6 +125,16 @@ function renderMeta(p: Player): void {
     metaDetail.textContent =
       `${info.model} @ ${info.clockFrequency.toLocaleString()} Hz, ` +
       `play every ${info.playInterval.toLocaleString()} cycles (${hz.toFixed(2)} Hz)`;
+  } else {
+    metaContainer.textContent = info.container.toUpperCase();
+    metaVariant.textContent = info.variant || '—';
+    metaTitle.textContent = info.title || '—';
+    metaAuthor.textContent = info.author || '—';
+    metaNotes.textContent = info.comment || '—';
+    metaDetail.textContent =
+      `${info.model} @ ${info.clockFrequency.toLocaleString()} Hz, ` +
+      `${info.events.toLocaleString()} writes @ ${info.tickRate} Hz` +
+      `${info.loop ? ' (looping)' : ''}`;
   }
 }
 
@@ -161,6 +173,7 @@ async function ensureFactory(): Promise<CawtoothPlayer> {
     formats: {
       opl: { workletUrl: oplWorkletUrl, wasmUrl: oplWasmUrl },
       psid: { workletUrl: psidWorkletUrl, wasmUrl: psidWasmUrl },
+      ay: { workletUrl: ayWorkletUrl, wasmUrl: ayumiWasmUrl },
     },
   });
   return factory;
