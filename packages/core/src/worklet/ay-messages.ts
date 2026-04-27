@@ -1,4 +1,5 @@
 import type { AyChipModel } from '../chip/ayumi-chip.js';
+import type { RegisterEventStream, RegisterStreamTiming } from '../sequencer/types.js';
 
 /** One AY register write — 4-bit address (R0–R15) + 8-bit value. */
 export interface AyRegisterWrite {
@@ -40,6 +41,32 @@ export interface AyResetMessage {
   type: 'reset';
 }
 
+/**
+ * Replace the sequencer's current event stream. Does not auto-play —
+ * caller must follow with `play`. The stream's typed arrays are
+ * structured-cloned across to the worklet.
+ */
+export interface AyLoadStreamMessage {
+  type: 'loadStream';
+  stream: RegisterEventStream;
+  timing: RegisterStreamTiming;
+}
+
+/** Begin / resume sequencer playback. */
+export interface AyPlayMessage {
+  type: 'play';
+}
+
+/** Halt sequencer time advancement; chip keeps its current register state. */
+export interface AyPauseMessage {
+  type: 'pause';
+}
+
+/** Stop sequencer, rewind to song start, reset chip. */
+export interface AyStopMessage {
+  type: 'stop';
+}
+
 export interface AySubscribeChannelsMessage {
   type: 'subscribeChannels';
 }
@@ -53,6 +80,10 @@ export type ToAyWorkletMessage =
   | AyWriteMessage
   | AyWritesMessage
   | AyResetMessage
+  | AyLoadStreamMessage
+  | AyPlayMessage
+  | AyPauseMessage
+  | AyStopMessage
   | AySubscribeChannelsMessage
   | AyUnsubscribeChannelsMessage;
 
@@ -78,4 +109,24 @@ export interface AyChannelsMessage {
   numFrames: number;
 }
 
-export type FromAyWorkletMessage = AyReadyMessage | AyErrorMessage | AyChannelsMessage;
+/** Progress tick — throttled to ~20 Hz on the worklet side. */
+export interface AyProgressMessage {
+  type: 'progress';
+  currentTimeSec: number;
+  durationSec: number | null;
+}
+
+/**
+ * Fired exactly once per loaded stream when the sequencer exhausts the
+ * event list and runs past the final tick. Non-looping streams only.
+ */
+export interface AyEndedMessage {
+  type: 'ended';
+}
+
+export type FromAyWorkletMessage =
+  | AyReadyMessage
+  | AyErrorMessage
+  | AyChannelsMessage
+  | AyProgressMessage
+  | AyEndedMessage;

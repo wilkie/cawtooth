@@ -1,5 +1,7 @@
 import { type AyChipModel, AY_CLOCK_ZX } from '../chip/ayumi-chip.js';
 import type { ChannelsListener } from './opl-player.js';
+import { Player, type AyPlayerInfo } from './player.js';
+import type { RegisterEventStream, RegisterStreamTiming } from '../sequencer/types.js';
 import { AY_PROCESSOR_NAME } from '../worklet/ay-processor-name.js';
 import type {
   AyRegisterWrite,
@@ -26,28 +28,54 @@ export interface AyPlayerOptions {
 }
 
 /**
+ * Optional metadata to attach to the loaded stream. Surfaced via the
+ * player's `info` getter so a generic UI can show title/author/etc.
+ * without knowing what container the bytes came from. CawtoothPlayer.load()
+ * fills these in from the parsed song; standalone callers can pass them
+ * explicitly or omit them entirely (defaults are empty strings).
+ */
+export interface AyLoadStreamMetadata {
+  container?: 'psg' | 'vtx' | 'ym' | 'unknown';
+  variant?: string;
+  title?: string;
+  author?: string;
+  comment?: string;
+}
+
+/**
  * Main-thread handle for driving the AY worklet.
  *
- * Parallel to SidPlayer: a low-level register-write surface for the
- * AY-3-8910 / YM2149 chip emulator, deliberately minimal so the AY-tone
- * example and (eventually) AY format players can share the same audio
- * path. Format-aware playback will land in a follow-up phase that adds
- * `loadStream` (for register-dump formats like .vtx, .ym, .psg) and
- * possibly a separate AyTunePlayer for Z80-bytecode .ay files.
+ * Two modes share one player:
+ *   - **Direct register writes** (`writeRegister` / `writeRegisters` /
+ *     `reset`) bypass the sequencer — used by the ay-tone demo and any
+ *     other low-level register-pokers.
+ *   - **Stream playback** (`loadStream` + `play` / `pause` / `stop`) feeds
+ *     the worklet's RegisterSequencer for register-dump formats like
+ *     `.psg`, `.vtx`, `.ym`. The transport surface inherited from
+ *     `Player` only takes effect once a stream is loaded — calling
+ *     `play()` with no stream loaded is a harmless no-op.
  *
- * AyPlayer does NOT extend the abstract `Player` base — it has no
- * concept of a tune, transport, or progress. The Phase 2 register-dump
- * support will combine these surfaces into one class (the OplPlayer
- * pattern).
+ * After `create()` returns the player is **paused-at-zero** (no stream,
+ * no audio production). Mirrors OplPlayer / PsidPlayer.
  */
-export class AyPlayer {
-  private readonly channelListeners = new Set<ChannelsListener>();
+export class AyPlayer extends Player {
+  private readonly _info: {
+    -readonly [K in keyof AyPlayerInfo]: AyPlayerInfo[K];
+  };
+
+  private currentTimeSec = 0;
+  private durationSec: number | null = null;
+  private playing = false;
+  private endedFired = false;
 
   private constructor(
-    private readonly ctx: AudioContext,
-    private readonly ownsContext: boolean,
-    private readonly node: AudioWorkletNode,
+    ctx: AudioContext,
+    ownsContext: boolean,
+    node: AudioWorkletNode,
+    info: AyPlayerInfo,
   ) {
+    super(ctx, ownsContext, node);
+    this._info = { ...info };
     this.installMessageDispatcher();
   }
 
@@ -98,25 +126,54 @@ export class AyPlayer {
       };
     });
 
+    const clockFrequency = options.clockFrequency ?? AY_CLOCK_ZX;
+    const model = options.model ?? 'AY-3-8910';
+
     const initMsg: ToAyWorkletMessage = {
       type: 'init',
       wasmBytes,
-      clockFrequency: options.clockFrequency ?? AY_CLOCK_ZX,
-      model: options.model ?? 'AY-3-8910',
+      clockFrequency,
+      model,
       pan: options.pan,
     };
     node.port.postMessage(initMsg, [wasmBytes]);
     await ready;
 
-    return new AyPlayer(ctx, ownsContext, node);
+    const info: AyPlayerInfo = {
+      format: 'ay',
+      container: 'unknown',
+      variant: '',
+      title: '',
+      author: '',
+      comment: '',
+      model,
+      clockFrequency,
+      tickRate: 0,
+      events: 0,
+      loop: false,
+    };
+
+    return new AyPlayer(ctx, ownsContext, node, info);
   }
 
-  get audioContext(): AudioContext {
-    return this.ctx;
+  get format(): 'ay' {
+    return 'ay';
   }
 
-  get output(): AudioWorkletNode {
-    return this.node;
+  get info(): AyPlayerInfo {
+    return this._info;
+  }
+
+  get currentTime(): number {
+    return this.currentTimeSec;
+  }
+
+  get duration(): number | null {
+    return this.durationSec;
+  }
+
+  get isPlaying(): boolean {
+    return this.playing;
   }
 
   writeRegister(reg: number, value: number): void {
@@ -132,6 +189,55 @@ export class AyPlayer {
   reset(): void {
     const msg: ToAyWorkletMessage = { type: 'reset' };
     this.node.port.postMessage(msg);
+  }
+
+  /**
+   * Replace the sequencer's current event stream. Does not auto-play —
+   * call `play()` to begin. The stream's typed arrays are
+   * structured-cloned across to the worklet, so the caller's copy
+   * remains usable after this returns.
+   *
+   * `metadata` populates `info` so a UI can render title/author/etc.
+   * without knowing the source format.
+   */
+  loadStream(
+    stream: RegisterEventStream,
+    timing: RegisterStreamTiming,
+    metadata?: AyLoadStreamMetadata,
+  ): void {
+    const msg: ToAyWorkletMessage = { type: 'loadStream', stream, timing };
+    this.node.port.postMessage(msg);
+
+    this._info.container = metadata?.container ?? 'unknown';
+    this._info.variant = metadata?.variant ?? '';
+    this._info.title = metadata?.title ?? '';
+    this._info.author = metadata?.author ?? '';
+    this._info.comment = metadata?.comment ?? '';
+    this._info.tickRate = timing.tickRate;
+    this._info.events = stream.regs.length;
+    this._info.loop = timing.loop ?? false;
+
+    this.currentTimeSec = 0;
+    this.durationSec = null;
+    this.endedFired = false;
+    this.playing = false;
+  }
+
+  play(): void {
+    this.node.port.postMessage({ type: 'play' } satisfies ToAyWorkletMessage);
+    this.playing = true;
+  }
+
+  pause(): void {
+    this.node.port.postMessage({ type: 'pause' } satisfies ToAyWorkletMessage);
+    this.playing = false;
+  }
+
+  stop(): void {
+    this.node.port.postMessage({ type: 'stop' } satisfies ToAyWorkletMessage);
+    this.playing = false;
+    this.currentTimeSec = 0;
+    this.endedFired = false;
   }
 
   /**
@@ -155,25 +261,6 @@ export class AyPlayer {
     };
   }
 
-  async resumeAudio(): Promise<void> {
-    if (this.ctx.state === 'suspended') {
-      await this.ctx.resume();
-    }
-  }
-
-  async dispose(): Promise<void> {
-    this.channelListeners.clear();
-    try {
-      this.node.disconnect();
-    } catch {
-      // Already disconnected — ignore.
-    }
-    this.node.port.close();
-    if (this.ownsContext) {
-      await this.ctx.close();
-    }
-  }
-
   private installMessageDispatcher(): void {
     this.node.port.onmessage = (ev: MessageEvent<FromAyWorkletMessage>) => {
       const msg = ev.data;
@@ -182,6 +269,22 @@ export class AyPlayer {
           for (const cb of this.channelListeners) {
             cb(msg.data, msg.numFrames);
           }
+          return;
+        }
+        case 'progress': {
+          this.currentTimeSec = msg.currentTimeSec;
+          this.durationSec = msg.durationSec;
+          const info = {
+            currentTimeSec: msg.currentTimeSec,
+            durationSec: msg.durationSec,
+          };
+          for (const cb of this.progressListeners) cb(info);
+          return;
+        }
+        case 'ended': {
+          if (this.endedFired) return;
+          this.endedFired = true;
+          for (const cb of this.endedListeners) cb();
           return;
         }
         case 'error': {

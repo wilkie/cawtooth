@@ -1,15 +1,18 @@
-import { OPL_CHANNEL_COUNT, type OplChip } from '../chip/types.js';
+import type { PerVoiceChip } from '../chip/types.js';
 import type { RegisterEventStream, RegisterStreamTiming } from './types.js';
 
 type RenderChunk = (startFrame: number, frameCount: number) => void;
 
 /**
- * Drives an OPL chip from a RegisterEventStream in sample-accurate time.
+ * Drives a register-driven sound chip from a RegisterEventStream in
+ * sample-accurate time.
  *
  * The sequencer is pure and synchronous — it owns a chip, maintains a
  * playback cursor, and interleaves register writes with audio generation
  * whenever `generate()` is called. The same class runs inside the audio
- * worklet and from Node-side unit tests.
+ * worklet and from Node-side unit tests. It works for any `PerVoiceChip`
+ * (OPL, AY, anything else with the same shape); per-voice buffer sizing
+ * comes from `chip.voiceCount`.
  *
  * Timing notes:
  *   - Each event's target sample offset from song start is precomputed at
@@ -21,7 +24,7 @@ type RenderChunk = (startFrame: number, frameCount: number) => void;
  *     compound across the stream.
  */
 export class RegisterSequencer {
-  private readonly chip: OplChip;
+  private readonly chip: PerVoiceChip;
 
   private regs: Uint16Array = new Uint16Array(0);
   private values: Uint8Array = new Uint8Array(0);
@@ -34,7 +37,7 @@ export class RegisterSequencer {
   private playing = false;
   private loop = false;
 
-  constructor(chip: OplChip) {
+  constructor(chip: PerVoiceChip) {
     this.chip = chip;
   }
 
@@ -121,20 +124,19 @@ export class RegisterSequencer {
    * Like `generate()`, but also fills a per-voice buffer in one pass.
    *
    * `channelsOutput` layout: frame-interleaved, total length
-   * `numFrames * OPL_CHANNEL_COUNT`. See `OplChip.generateWithChannels` for
-   * the per-voice semantics (pre-pan, not routed through the mix mask).
+   * `numFrames * chip.voiceCount`. See `PerVoiceChip.generateWithChannels`
+   * for the per-voice semantics (pre-pan, pre-mix where applicable).
    */
   generateWithChannels(stereoOutput: Float32Array, channelsOutput: Float32Array): void {
     const totalFrames = stereoOutput.length >>> 1;
-    if (channelsOutput.length < totalFrames * OPL_CHANNEL_COUNT) {
-      throw new Error(
-        `cawtooth: channelsOutput must hold numFrames * ${OPL_CHANNEL_COUNT} samples`,
-      );
+    const voices = this.chip.voiceCount;
+    if (channelsOutput.length < totalFrames * voices) {
+      throw new Error(`cawtooth: channelsOutput must hold numFrames * ${voices} samples`);
     }
     this.render(totalFrames, (start, frames) => {
       this.chip.generateWithChannels(
         stereoOutput.subarray(start * 2, (start + frames) * 2),
-        channelsOutput.subarray(start * OPL_CHANNEL_COUNT, (start + frames) * OPL_CHANNEL_COUNT),
+        channelsOutput.subarray(start * voices, (start + frames) * voices),
       );
     });
   }

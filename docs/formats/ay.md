@@ -1,9 +1,12 @@
 # AY-3-8910 / YM2149
 
-This document describes the **chip family** rather than a single file
-format. Several distinct music formats target the AY-3-8910 (`.vtx`,
-`.ym`, `.psg`, `.ay`); each will get its own dedicated section once the
-parsers land. For now the chip itself is the foundation.
+This document covers the **chip family** plus the three register-dump
+container formats we currently parse: `.psg`, `.vtx`, and `.ym`. Each
+container ultimately resolves to a sequence of register writes against
+the same emulator, so they share the same player (`AyPlayer`) and only
+differ in how the bytes on disk are framed and compressed. The
+Z80-bytecode `.ay` format (the AY equivalent of PSID) is not yet
+implemented — see Phase 3 below.
 
 ## What it is
 
@@ -118,7 +121,7 @@ decimating to the host audio rate. DC removal is enabled by default
 (removes the slow drift Ayumi's mixer accumulates from the DAC's
 non-zero idle level).
 
-### What works (Phase 1)
+### What works (Phase 1 — chip)
 
 - Both **AY-3-8910** (16-step DAC) and **YM2149** (32-step DAC)
   variants, selectable via the `model` option.
@@ -134,17 +137,27 @@ non-zero idle level).
 - **Per-voice channel taps** for scope visualization — pre-pan,
   pre-mix DAC samples for each of the three tone channels.
 
-### What's coming (Phase 2)
+### What works (Phase 2 — formats)
 
-- **Format parsers** for the major AY register-dump formats:
-  - `.vtx` — Vortex Tracker format (compressed, ZX Spectrum origin)
-  - `.ym` — Atari ST tracker format (with optional digi-drum samples)
-  - `.psg` — Simple uncompressed register-dump format
-  - VGM AY-only files
-- A high-level `loadStream` API on `AyPlayer` mirroring `OplPlayer`,
-  so the same player drives both direct register writes and
-  format-rendered streams.
-- Auto-detection through `CawtoothPlayer.load()`.
+- **`.psg`** parser — simple uncompressed register-dump format with
+  one-byte run-length opcodes (`0xFF` = end-of-frame, `0xFE n` = skip
+  `4·n` frames, `0xFD` = end-of-music).
+- **`.vtx`** parser — Vortex Tracker container with a binary header,
+  five CP1251 metadata strings, and an LH5-compressed column-major
+  register dump (14 registers per frame).
+- **`.ym`** parser — Atari ST format. Handles YM5! / YM6! with the
+  standard "interleaved" attribute bit set and the LHA "-lh5-"
+  wrapper most files in the wild use. See "What we don't model"
+  below for digidrum and YM3 caveats.
+- **`AyPlayer.loadStream`** — the same transport surface as
+  `OplPlayer.loadStream` (play / pause / stop / progress / ended /
+  channel taps). Direct `writeRegister` and `loadStream` coexist on
+  the same player; the tone demo uses the former, format playback
+  uses the latter.
+- **`CawtoothPlayer.load()` auto-dispatch** — magic-byte sniffing
+  for PSG and YM5/YM6, lowercase `ay` / `ym` for VTX, plus filename
+  fallback for LHA-wrapped YM and any of the three when the bytes
+  themselves are ambiguous.
 
 ### What's coming later (Phase 3)
 
@@ -153,6 +166,10 @@ non-zero idle level).
   fake6502+reSID setup for PSID. Likely lands as a separate
   `AyTunePlayer` class (mirroring `PsidPlayer`) since the wasm
   module is structurally different.
+- VGM AY-only register dumps — the spec is well-documented, and the
+  byte-for-byte register stream maps cleanly onto our existing
+  sequencer; landing it once we have a real reason (e.g. a corpus
+  test or a user request).
 
 ### What we don't model
 
@@ -168,13 +185,118 @@ non-zero idle level).
   rate. The stereo mix is FIR-decimated and accurate; the per-voice
   view is faithful for visualisation but slightly undersampled
   compared to the actual mixer input.
+- **YM digidrum samples**. YM5/YM6 files can carry raw PCM samples
+  triggered by a special encoding in R13. We parse past the sample
+  directory and data so the file loads, but the drum hits themselves
+  don't reach the chip. Tunes that lean on digidrums sound thinner
+  than they should; melodic content is unaffected.
+- **YM3 / YM3b raw variants**. The pre-LHA YM formats are
+  uncompressed 14-bytes-per-frame dumps with no inner header; we
+  don't probe for them yet. They're rare in modern archives.
+- **VTX layout / loop-frame replay**. We surface the file's
+  `loop=true` flag and respect the caller's loop choice, but ignore
+  the layout byte (mono vs. ABC vs. ACB stereo) — `AyPlayer` applies
+  its own pan defaults. The loop start frame from the header isn't
+  used; loops restart from event 0.
+
+## .psg binary structure
+
+```
+offset  size  field
+0       4     magic = 'P','S','G',0x1A
+4       1     version (informational; commonly 0x10)
+5       1     frame rate Hz (0 = default 50)
+6       10    reserved (zero-padded)
+16+     ...   payload of one-byte opcodes
+```
+
+Payload opcodes:
+
+| Opcode   | Meaning                                                        |
+| -------- | -------------------------------------------------------------- |
+| `0xFD`   | End of music — parser stops.                                   |
+| `0xFE n` | Wait `n × 4` frames before the next event.                     |
+| `0xFF`   | Wait one frame (advance to the next tick).                     |
+| `R V`    | Write byte `V` to register `R` (`R` masked to low 4 bits). All |
+|          | (R, V) pairs between two `0xFF` markers happen on the same     |
+|          | tick.                                                          |
+
+The format encodes no metadata — title, author, model, and clock are
+not present. We default to AY-3-8910 at the ZX Spectrum clock; callers
+that know better can override at the player layer.
+
+## .vtx binary structure
+
+All multi-byte integers are **little-endian**.
+
+```
+offset  size  field
+0       2     magic = 'a','y'  → AY-3-8910
+              or     'y','m'  → YM2149
+2       1     channel layout (0=mono, 1..6 = stereo permutations)
+3       2     loop start frame index
+5       4     chip clock Hz
+9       1     interrupt frequency Hz (50 PAL / 60 NTSC)
+10      2     year (informational)
+12      4     decompressed payload size in bytes
+16      ...   five null-terminated CP1251 strings:
+                title, author, program, tracker, comment
+...     ...   LH5-compressed payload — a column-major register table
+              of 14 columns (R0..R13) × N rows (frames). Decompressed
+              size = 14 * numFrames.
+```
+
+The compressed payload is a raw LH5 bitstream (no LHA wrapper).
+Decoding produces `column[k][i]` = the value the original program
+held in register `k` at frame `i`. We de-interleave into a row-major
+event stream, emitting only writes whose value differs from the
+previous frame.
+
+## .ym binary structure
+
+YM is the Atari ST tracker format. Almost every file in the wild is
+wrapped in an LHA archive whose single member is the raw YM5/YM6
+register dump compressed with **LH5**. We unwrap level-0 and level-1
+LHA headers; level-2 headers are uncommon for YM files and not yet
+supported.
+
+The inner YM header is **big-endian** (note the difference from VTX):
+
+```
+offset  size  field
+0       4     magic = 'Y','M','5','!'  or 'Y','M','6','!'
+4       8     check string = 'L','e','O','n','A','r','D','!'
+12      4     number of frames (BE u32)
+16      4     attribute flags (BE u32) — bit 0: interleaved storage
+20      2     digidrum sample count (BE u16)
+22      4     chip clock Hz (BE u32)
+26      2     tick rate Hz (BE u16) — 50 typically, 60 occasionally
+28      4     loop start frame (BE u32)
+32      2     extra-info size in bytes (BE u16; we skip them)
+```
+
+Following the fixed header, in order:
+
+- Optional digidrum directory: `digidrumCount × 4` bytes of BE u32
+  sample sizes, then concatenated PCM data.
+- Three null-terminated Windows-1252 strings: song name, author,
+  comment.
+- `numFrames × 16` bytes of register data. Interleaved layout (column
+  k spans `numFrames` consecutive bytes) when attribute bit 0 is set,
+  frame-major (16-byte rows) when clear.
+- Trailing 4-byte sentinel `'E','n','d','!'` (we don't enforce it —
+  some re-packers strip it).
+
+We track only the lower 14 registers for change-detection — R14 and
+R15 are I/O ports / digidrum control that AyumiChip doesn't model.
 
 ## References
 
 - [Ayumi source + design notes](https://github.com/true-grue/ayumi)
 - [AY-3-8910 datasheet (Grauw mirror)](https://map.grauw.nl/resources/sound/generalinstrument_ay-3-8910.pdf)
 - [Vortex Tracker / VTX format](https://bulba.untergrund.net/vortex_e.htm)
-- [YM file format](http://leonard.oxg.free.fr/ymformat.html)
+- [YM file format (Leonard Oxaal)](http://leonard.oxg.free.fr/ymformat.html)
+- [LHA / LZH file format spec](https://github.com/jca02266/lha)
 - [VGM format (covers AY)](https://vgmrips.net/wiki/VGM_Specification)
 
 ## Maintainer notes
@@ -200,3 +322,19 @@ non-zero idle level).
   pass after a bump; the most likely source of breakage is internal
   field reordering in `struct ayumi`, which would silently break the
   per-channel snapshot in `cawtooth_ay_generate_channels`.
+- The LH5 decoder under `formats/ay/lh5.ts` uses a tree-walk Huffman
+  decoder rather than the table-based version in the LHA reference.
+  It's slower per-byte but markedly easier to verify against the
+  spec; AY payloads top out around 100 KiB, so the speed delta is
+  invisible. Rewriting to a table form is fine if a profiler ever
+  pinpoints it.
+- Test coverage for `lh5.ts` includes a hand-built non-singleton
+  Huffman block (`decodes a non-singleton c_table built from real
+canonical Huffman codes`) — it's the canary for any regression in
+  `buildTree`'s canonical-code assignment, which is the part of the
+  decoder most likely to silently break.
+- VTX strings are decoded as **CP1251** (Cyrillic Windows codepage)
+  to match the format's ZX Spectrum demoscene origins. YM strings
+  use **CP1252** (Western Europe), matching Atari ST defaults. Don't
+  unify them — round-tripping ASCII through both works, but Cyrillic
+  metadata is unreadable through CP1252 and vice versa.

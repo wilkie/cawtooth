@@ -102,6 +102,143 @@ test.describe('AyPlayer', () => {
     expect(result.phaseBCount).toBeLessThan(200);
   });
 
+  test('loadStream + play produces audio and fires ended', async ({ page }) => {
+    // Build a synthetic event stream that programs the same A4 tone, lets
+    // it ring for ~12 ticks (≈240 ms at 50 Hz) without any further writes,
+    // then ends. The sequencer fires `ended` once it crosses the final
+    // delay; we check both audio output and that signal land.
+    const result = await page.evaluate(
+      async ({ writes, urls }) => {
+        const { AyPlayer } = window.cawtooth;
+        const player = await AyPlayer.create({
+          workletUrl: urls.ayWorklet,
+          wasmUrl: urls.ayumiWasm,
+        });
+        player.output.connect(player.audioContext.destination);
+        await player.resumeAudio();
+
+        // Build a parallel-arrays event stream: each register write at
+        // delay 0 except the last, which carries the full tail in ticks.
+        const regs = new Uint16Array(writes.map((w) => w.reg));
+        const values = new Uint8Array(writes.map((w) => w.value));
+        const delayTicks = new Uint32Array(writes.length);
+        delayTicks[delayTicks.length - 1] = 12;
+
+        let endedFired = false;
+        const unsubEnded = player.onEnded(() => {
+          endedFired = true;
+        });
+
+        let progressTicks = 0;
+        const unsubProgress = player.onProgress(() => {
+          progressTicks++;
+        });
+
+        let nonZeroCount = 0;
+        const unsubChannels = player.onChannels((data) => {
+          for (let i = 0; i < data.length; i++) {
+            if (Math.abs(data[i]) > 0.0005) nonZeroCount++;
+          }
+        });
+
+        player.loadStream(
+          { regs, values, delayTicks },
+          { tickRate: 50, loop: false },
+          { container: 'psg' },
+        );
+        const beforePlay = player.isPlaying;
+        player.play();
+        await new Promise((r) => setTimeout(r, 700));
+
+        unsubChannels();
+        unsubProgress();
+        unsubEnded();
+        await player.dispose();
+
+        return {
+          beforePlay,
+          format: player.format,
+          container: player.info.container,
+          events: player.info.events,
+          tickRate: player.info.tickRate,
+          nonZeroCount,
+          endedFired,
+          progressTicks,
+        };
+      },
+      { writes: A4_TONE_WRITES, urls: await page.evaluate(() => window.cawtoothUrls) },
+    );
+
+    expect(result.beforePlay).toBe(false);
+    expect(result.format).toBe('ay');
+    expect(result.container).toBe('psg');
+    expect(result.events).toBe(A4_TONE_WRITES.length);
+    expect(result.tickRate).toBe(50);
+    expect(result.nonZeroCount).toBeGreaterThan(1000);
+    expect(result.endedFired).toBe(true);
+    // Progress fires ~20 Hz. ~240ms of playback gives a handful of ticks;
+    // be generous on the lower bound to avoid timing flakes on slow CI.
+    expect(result.progressTicks).toBeGreaterThan(0);
+  });
+
+  test('CawtoothPlayer auto-loads a PSG file by magic and plays it', async ({ page }) => {
+    // Build a tiny PSG: header (16 bytes, version=0x10, rate=0/default),
+    // then the same A4-tone register pokes followed by a few frame-end
+    // markers and an explicit 0xFD terminator.
+    const result = await page.evaluate(
+      async ({ writes, urls }) => {
+        const header = [0x50, 0x53, 0x47, 0x1a, 0x10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        const payload: number[] = [];
+        for (const w of writes) {
+          payload.push(w.reg, w.value);
+        }
+        // 8 frame markers (~160 ms at 50 Hz) so the chip rings for a
+        // measurable window before EOM.
+        for (let i = 0; i < 8; i++) payload.push(0xff);
+        payload.push(0xfd);
+        const psgBytes = new Uint8Array([...header, ...payload]);
+
+        const { CawtoothPlayer, AyPlayer } = window.cawtooth;
+        const factory = await CawtoothPlayer.init({
+          formats: { ay: { workletUrl: urls.ayWorklet, wasmUrl: urls.ayumiWasm } },
+        });
+        const player = await factory.load(psgBytes);
+        const isAy = player instanceof AyPlayer;
+        const fmt = player.format;
+        const info = { ...player.info };
+
+        player.output.connect(player.audioContext.destination);
+        await player.resumeAudio();
+
+        let nonZeroCount = 0;
+        const unsub = player.onChannels((data) => {
+          for (let i = 0; i < data.length; i++) {
+            if (Math.abs(data[i]) > 0.0005) nonZeroCount++;
+          }
+        });
+
+        player.play();
+        await new Promise((r) => setTimeout(r, 500));
+
+        unsub();
+        await player.dispose();
+        await factory.dispose();
+        return { isAy, fmt, info, nonZeroCount };
+      },
+      { writes: A4_TONE_WRITES, urls: await page.evaluate(() => window.cawtoothUrls) },
+    );
+
+    expect(result.isAy).toBe(true);
+    expect(result.fmt).toBe('ay');
+    expect(result.info.format).toBe('ay');
+    if (result.info.format === 'ay') {
+      expect(result.info.container).toBe('psg');
+      expect(result.info.tickRate).toBe(50);
+      expect(result.info.events).toBeGreaterThanOrEqual(A4_TONE_WRITES.length);
+    }
+    expect(result.nonZeroCount).toBeGreaterThan(1000);
+  });
+
   test('YM2149 model also produces audio', async ({ page }) => {
     // Sanity: the YM variant has a different (32-step) DAC table.
     // Confirms the model parameter actually plumbs through to wasm.

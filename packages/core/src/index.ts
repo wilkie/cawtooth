@@ -86,7 +86,13 @@ export {
 export type { AyChipModel, AyChipOptions } from './chip/ayumi-chip.js';
 
 export { AyPlayer } from './audio/ay-player.js';
-export type { AyPlayerOptions } from './audio/ay-player.js';
+export type { AyLoadStreamMetadata, AyPlayerOptions } from './audio/ay-player.js';
+
+export { parsePsg } from './formats/ay/psg.js';
+export { parseVtx } from './formats/ay/vtx.js';
+export { parseYm } from './formats/ay/ym.js';
+export { decompressLh5 } from './formats/ay/lh5.js';
+export type { AySong } from './formats/ay/types.js';
 
 export { AY_PROCESSOR_NAME } from './worklet/ay-processor-name.js';
 export type {
@@ -150,7 +156,7 @@ export { PsidPlayer } from './audio/psid-player.js';
 export type { PsidPlayerCreateOptions } from './audio/psid-player.js';
 
 export { Player } from './audio/player.js';
-export type { OplPlayerInfo, PlayerInfo, PsidPlayerInfo } from './audio/player.js';
+export type { AyPlayerInfo, OplPlayerInfo, PlayerInfo, PsidPlayerInfo } from './audio/player.js';
 export type { OplLoadStreamMetadata } from './audio/opl-player.js';
 
 export { CawtoothPlayer, detectFormat } from './audio/cawtooth-player.js';

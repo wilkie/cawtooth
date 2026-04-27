@@ -91,6 +91,10 @@ export function parseOpl(
       return renderHeradToStream(song);
     }
     case 'psid':
+    case 'psg':
+    case 'vtx':
+    case 'ym':
+      // Recognized non-OPL containers — caller can branch via the null.
       return null;
   }
 }

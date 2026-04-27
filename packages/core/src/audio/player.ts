@@ -1,14 +1,15 @@
+import type { AyChipModel } from '../chip/ayumi-chip.js';
 import type { SidChipModel } from '../chip/resid-sid.js';
 import type { ChannelsListener } from './opl-player.js';
 import type { EndedListener, ProgressListener } from './player-events.js';
 
 /**
  * Discriminated union of player metadata. Narrow on `.format` to access
- * format-specific fields. Both variants share `currentTime` / `duration` /
+ * format-specific fields. All variants share `currentTime` / `duration` /
  * `isPlaying` semantics on the parent `Player`; this type is for the
  * intrinsic, mostly-static description of the loaded tune.
  */
-export type PlayerInfo = OplPlayerInfo | PsidPlayerInfo;
+export type PlayerInfo = OplPlayerInfo | PsidPlayerInfo | AyPlayerInfo;
 
 export interface OplPlayerInfo {
   readonly format: 'opl';
@@ -23,6 +24,30 @@ export interface OplPlayerInfo {
   /** Free-form remarks field; empty when not present. */
   readonly remarks: string;
   /** Tick rate the sequencer is running at (Hz). */
+  readonly tickRate: number;
+  /** Total register-event count in the loaded stream. */
+  readonly events: number;
+  /** True when the sequencer is configured to loop. */
+  readonly loop: boolean;
+}
+
+export interface AyPlayerInfo {
+  readonly format: 'ay';
+  /** Container the bytes were parsed from. */
+  readonly container: 'psg' | 'vtx' | 'ym' | 'unknown';
+  /** Sub-variant ('YM5', 'YM6', 'ay!', 'ym!', …). Empty when unknown. */
+  readonly variant: string;
+  /** Title from container metadata; empty when not present. */
+  readonly title: string;
+  /** Composer / author field; empty when not present. */
+  readonly author: string;
+  /** Free-form comment field; empty when not present. */
+  readonly comment: string;
+  /** Chip variant the file was authored against. */
+  readonly model: AyChipModel;
+  /** Host clock in Hz (e.g. 1773400 for ZX Spectrum, 2000000 for Atari ST). */
+  readonly clockFrequency: number;
+  /** Tick rate the sequencer is running at (Hz). 50 for ZX/Atari, 60 occasionally. */
   readonly tickRate: number;
   /** Total register-event count in the loaded stream. */
   readonly events: number;
@@ -95,7 +120,7 @@ export abstract class Player {
     }
   }
 
-  abstract get format(): 'opl' | 'psid';
+  abstract get format(): 'opl' | 'psid' | 'ay';
   abstract get info(): PlayerInfo;
 
   /** Begin / resume audio production. */

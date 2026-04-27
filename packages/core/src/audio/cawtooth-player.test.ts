@@ -60,4 +60,39 @@ describe('detectFormat', () => {
     const bytes = new Uint8Array([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
     expect(() => detectFormat(bytes, 'mystery.bin')).toThrow(/mystery\.bin/);
   });
+
+  it('identifies PSG by its 4-byte ASCII magic', () => {
+    const bytes = new Uint8Array([0x50, 0x53, 0x47, 0x1a, 0, 0, 0, 0]);
+    expect(detectFormat(bytes)).toBe('psg');
+  });
+
+  it('identifies raw YM5/YM6 by their uppercase magic', () => {
+    expect(detectFormat(new Uint8Array([0x59, 0x4d, 0x35, 0x21]))).toBe('ym');
+    expect(detectFormat(new Uint8Array([0x59, 0x4d, 0x36, 0x21]))).toBe('ym');
+  });
+
+  it('identifies LHA-wrapped YM by the "-lh5-" method tag plus .ym filename hint', () => {
+    // Header byte 0 = headerSize, byte 1 = checksum, then "-lh5-".
+    const bytes = new Uint8Array([0x16, 0x00, 0x2d, 0x6c, 0x68, 0x35, 0x2d, 0x00]);
+    expect(detectFormat(bytes, 'tune.ym')).toBe('ym');
+  });
+
+  it('does NOT classify a bare LHA archive as YM without a filename hint', () => {
+    // Same "-lh5-" header but no .ym extension — could be any LHA file,
+    // so the sniffer should fall through and ultimately throw.
+    const bytes = new Uint8Array([0x16, 0x00, 0x2d, 0x6c, 0x68, 0x35, 0x2d, 0x00]);
+    expect(() => detectFormat(bytes)).toThrow(/could not detect/);
+  });
+
+  it('identifies VTX by its lowercase 2-byte magic ("ay" or "ym")', () => {
+    expect(detectFormat(new Uint8Array([0x61, 0x79, 1, 0, 0, 0, 0, 0]))).toBe('vtx');
+    expect(detectFormat(new Uint8Array([0x79, 0x6d, 1, 0, 0, 0, 0, 0]))).toBe('vtx');
+  });
+
+  it('falls back to filename extension for the AY family', () => {
+    const bytes = new Uint8Array([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+    expect(detectFormat(bytes, 'tune.psg')).toBe('psg');
+    expect(detectFormat(bytes, 'tune.vtx')).toBe('vtx');
+    expect(detectFormat(bytes, 'tune.ym')).toBe('ym');
+  });
 });

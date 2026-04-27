@@ -11,7 +11,11 @@ player.
 - **IMF**, **WLF**: Id Software Music Format housing OPL2 AdLib commands from earlier Id Software games such as Commander Keen and Wolfenstein 3D
 - **HSQ**, **SQX**, **AGD**, **HA2**: Cryo's HERAD music format that was used to sequence OPL2/3 AdLib music in games such as Dune,
 - **SID**: The PSID format which contains Commodore 64 instructions that are emulated to produce music for the SID chip.
-- **AY-3-8910 / YM2149**: chip support for the General Instrument PSG used by the ZX Spectrum 128, Atari ST, Amstrad CPC, MSX, and many arcade machines. Phase 1 ships the chip emulator and a low-level register-write player; format parsers (`.vtx`, `.ym`, `.psg`, `.ay`) land in a follow-up phase.
+- **AY-3-8910 / YM2149**: chip support for the General Instrument PSG used by the ZX Spectrum 128, Atari ST, Amstrad CPC, MSX, and many arcade machines. The library ships the chip emulator plus parsers for the three major register-dump container formats:
+  - **PSG**: the simple uncompressed ZX Spectrum register-dump format used by AY Emul and many demoscene utilities.
+  - **VTX**: the Vortex Tracker container — column-major register dump compressed with LH5, the de-facto AY tracker format.
+  - **YM**: the Atari ST tracker format (YM5/YM6 inside an LHA wrapper, also LH5-compressed). Digidrum samples are recognized but not played back.
+  - The Z80-bytecode `.ay` format remains a follow-up.
 
 ## Installation
 
@@ -21,9 +25,9 @@ npm install cawtooth
 
 The package ships ESM + CJS bundles, generated `.d.ts` files, the bundled
 AudioWorklet processors (under `cawtooth/worklet/opl`, `cawtooth/worklet/sid`,
-`cawtooth/worklet/psid`), and the WebAssembly chip emulators (under
-`cawtooth/wasm/*.wasm`). Most browser bundlers can resolve these via the
-`?url` import suffix — see the examples for the exact wiring.
+`cawtooth/worklet/psid`, `cawtooth/worklet/ay`), and the WebAssembly chip
+emulators (under `cawtooth/wasm/*.wasm`). Most browser bundlers can resolve
+these via the `?url` import suffix — see the examples for the exact wiring.
 
 ## Examples
 
@@ -61,14 +65,15 @@ progress UIs and per-voice oscilloscopes.
 
 If you only need the format identifier (e.g. for routing or display) without
 constructing a player, use `detectFormat` directly. It sniffs PSID/RSID, DRO,
-and HSQ/SQX-compressed HERAD from magic bytes; for IMF and decompressed HERAD,
-which have no magic, it falls back to a filename extension hint.
+PSG, raw YM5/YM6, VTX (`ay`/`ym` magic), and HSQ/SQX-compressed HERAD from
+magic bytes; for IMF, decompressed HERAD, and LHA-wrapped YM, which need a
+hint, it falls back to a filename extension.
 
 ```ts
 import { detectFormat } from 'cawtooth';
 
 const fmt = detectFormat(new Uint8Array(bytes), 'tune.imf');
-// → 'psid' | 'imf' | 'dro' | 'herad'
+// → 'psid' | 'imf' | 'dro' | 'herad' | 'psg' | 'vtx' | 'ym'
 ```
 
 Inside `CawtoothPlayer.load()` this is the same step that picks the parser

@@ -5,17 +5,23 @@ import { parseHerad } from '../formats/herad/parser.js';
 import { renderHeradToStream } from '../formats/herad/render.js';
 import { isHsq } from '../formats/herad/hsq.js';
 import { isSqx } from '../formats/herad/sqx.js';
+import { parsePsg } from '../formats/ay/psg.js';
+import { parseVtx } from '../formats/ay/vtx.js';
+import { parseYm } from '../formats/ay/ym.js';
+import type { AySong } from '../formats/ay/types.js';
 import { OplPlayer } from './opl-player.js';
 import { PsidPlayer } from './psid-player.js';
+import { AyPlayer } from './ay-player.js';
 import type { Player } from './player.js';
 
 /**
  * Concrete formats the factory knows how to detect and dispatch.
  *
  * `psid` covers both PSID and RSID files — the underlying parser + worklet
- * handle either transparently.
+ * handle either transparently. `ay` covers PSG / VTX / YM register dumps,
+ * which all feed the same AY worklet via `AyPlayer.loadStream`.
  */
-export type DetectedFormat = 'psid' | 'imf' | 'dro' | 'herad';
+export type DetectedFormat = 'psid' | 'imf' | 'dro' | 'herad' | 'psg' | 'vtx' | 'ym';
 
 /** Per-format runtime URLs. Worklet bundle + wasm module. */
 export interface CawtoothFormatConfig {
@@ -36,6 +42,7 @@ export interface CawtoothPlayerOptions {
   formats: {
     opl?: CawtoothFormatConfig;
     psid?: CawtoothFormatConfig;
+    ay?: CawtoothFormatConfig;
   };
   /**
    * Shared AudioContext. Created on demand if omitted. Sharing one
@@ -185,7 +192,47 @@ export class CawtoothPlayer {
         );
         return player;
       }
+      case 'psg':
+        return this.loadAy(parsePsg(view), options);
+      case 'vtx':
+        return this.loadAy(parseVtx(view), options);
+      case 'ym':
+        return this.loadAy(parseYm(view), options);
     }
+  }
+
+  /**
+   * Shared dispatch path for the three AY register-dump formats. Each
+   * AyPlayer is constructed with the song's chip clock baked in (Ayumi
+   * builds its resampler tables from clock at create time), so we make
+   * a fresh player per load — disposing any previous AY player is the
+   * caller's responsibility.
+   *
+   * `loop` defaults to the song's own flag (PSG never loops; VTX/YM
+   * always declare a loop point) so the most common case "play this
+   * tune the way the format intends" works without extra options.
+   */
+  private async loadAy(song: AySong, options: CawtoothLoadOptions): Promise<Player> {
+    const cfg = this.requireFormat('ay');
+    const player = await AyPlayer.create({
+      workletUrl: cfg.workletUrl,
+      wasmUrl: cfg.wasmUrl,
+      audioContext: this.ctx,
+      clockFrequency: song.clockFrequency,
+      model: song.model,
+    });
+    player.loadStream(
+      song.stream,
+      { tickRate: song.tickRate, loop: options.loop ?? song.loop },
+      {
+        container: song.container,
+        variant: song.variant,
+        title: song.title,
+        author: song.author,
+        comment: song.comment,
+      },
+    );
+    return player;
   }
 
   /**
@@ -199,7 +246,7 @@ export class CawtoothPlayer {
     }
   }
 
-  private requireFormat(name: 'opl' | 'psid'): CawtoothFormatConfig {
+  private requireFormat(name: 'opl' | 'psid' | 'ay'): CawtoothFormatConfig {
     const cfg = this.formats[name];
     if (!cfg) {
       throw new Error(
@@ -217,9 +264,13 @@ export class CawtoothPlayer {
  * Detection order, most-reliable first:
  *   1. PSID/RSID — 4-byte ASCII magic at offset 0 (collapsed to `'psid'`).
  *   2. DRO       — 8-byte 'DBRAWOPL' magic at offset 0.
- *   3. HSQ       — 6-byte header whose bytes sum to 0xAB (HERAD-compressed).
- *   4. SQX       — heuristic on bytes 2..5 (HERAD-compressed).
- *   5. filename  — fallback for raw IMF and decompressed HERAD.
+ *   3. PSG       — 4-byte 'PSG\x1A' magic at offset 0.
+ *   4. YM raw    — 'YM5!' or 'YM6!' at offset 0.
+ *   5. YM-in-LHA — '-lh5-' at offset 2 (LHA level-0/1 wrapper). Filename
+ *                  hint disambiguates from other LHA archives.
+ *   6. VTX       — lowercase 'ay' or 'ym' at offset 0.
+ *   7. HSQ / SQX — HERAD-compressed wrappers (heuristic).
+ *   8. filename  — fallback for raw IMF and decompressed HERAD.
  *
  * Throws when nothing matches. Pass `options.format` to `load()` to skip.
  */
@@ -246,13 +297,54 @@ export function detectFormat(bytes: Uint8Array, filename?: string): DetectedForm
   ) {
     return 'dro';
   }
+  // PSG: 'PSG\x1A' (0x50 0x53 0x47 0x1A).
+  if (
+    bytes.length >= 4 &&
+    bytes[0] === 0x50 &&
+    bytes[1] === 0x53 &&
+    bytes[2] === 0x47 &&
+    bytes[3] === 0x1a
+  ) {
+    return 'psg';
+  }
+  // YM5! / YM6! — uppercase 4-byte magic.
+  if (
+    bytes.length >= 4 &&
+    bytes[0] === 0x59 &&
+    bytes[1] === 0x4d &&
+    (bytes[2] === 0x35 || bytes[2] === 0x36) &&
+    bytes[3] === 0x21
+  ) {
+    return 'ym';
+  }
+  // LHA-wrapped YM: '-lh5-' at offset 2 (header level 0/1). Only treat
+  // it as YM when the filename hints at it; bare LHA archives could
+  // contain anything else.
+  if (
+    bytes.length >= 7 &&
+    bytes[2] === 0x2d &&
+    bytes[3] === 0x6c &&
+    bytes[4] === 0x68 &&
+    bytes[5] === 0x35 &&
+    bytes[6] === 0x2d &&
+    filename &&
+    filename.toLowerCase().endsWith('.ym')
+  ) {
+    return 'ym';
+  }
+  // VTX: lowercase 'ay' (0x61 0x79) or 'ym' (0x79 0x6d) at offset 0.
+  if (bytes.length >= 2) {
+    if ((bytes[0] === 0x61 && bytes[1] === 0x79) || (bytes[0] === 0x79 && bytes[1] === 0x6d)) {
+      return 'vtx';
+    }
+  }
   // Cryo HERAD compressed wrappers. isHsq checksum is 1/256 false-positive;
   // isSqx is heuristic but the field ranges are narrow.
   if (isHsq(bytes) || isSqx(bytes)) {
     return 'herad';
   }
 
-  // Filename fallback for formats without magic bytes.
+  // Filename fallback for formats without unambiguous magic.
   if (filename) {
     // Strip any path prefix (forward or back slash) before extracting the extension.
     const base = filename.replace(/^.*[\\/]/, '');
@@ -261,6 +353,9 @@ export function detectFormat(bytes: Uint8Array, filename?: string): DetectedForm
     if (ext === 'sid') return 'psid';
     if (ext === 'dro') return 'dro';
     if (ext === 'hsq' || ext === 'sqx' || ext === 'agd' || ext === 'ha2') return 'herad';
+    if (ext === 'psg') return 'psg';
+    if (ext === 'vtx') return 'vtx';
+    if (ext === 'ym') return 'ym';
   }
 
   throw new Error(
