@@ -16,7 +16,7 @@ export interface AySong {
   /** Ticks per second the file is authored at — usually 50 (PAL) or 60. */
   readonly tickRate: number;
   /** Container the bytes were parsed from. */
-  readonly container: 'psg' | 'vtx' | 'ym';
+  readonly container: 'psg' | 'vtx' | 'ym' | 'asc';
   /** Sub-variant identifier — `'YM5'`, `'ay!'`, etc. Empty when not meaningful. */
   readonly variant: string;
   /** Chip the file was authored against. AY-3-8910 unless the format flags YM. */

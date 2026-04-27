@@ -94,6 +94,7 @@ export function parseOpl(
     case 'psg':
     case 'vtx':
     case 'ym':
+    case 'asc':
       // Recognized non-OPL containers — caller can branch via the null.
       return null;
   }

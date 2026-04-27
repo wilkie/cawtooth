@@ -34,7 +34,7 @@ export interface OplPlayerInfo {
 export interface AyPlayerInfo {
   readonly format: 'ay';
   /** Container the bytes were parsed from. */
-  readonly container: 'psg' | 'vtx' | 'ym' | 'unknown';
+  readonly container: 'psg' | 'vtx' | 'ym' | 'asc' | 'unknown';
   /** Sub-variant ('YM5', 'YM6', 'ay!', 'ym!', …). Empty when unknown. */
   readonly variant: string;
   /** Title from container metadata; empty when not present. */

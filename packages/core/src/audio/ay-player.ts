@@ -35,7 +35,7 @@ export interface AyPlayerOptions {
  * explicitly or omit them entirely (defaults are empty strings).
  */
 export interface AyLoadStreamMetadata {
-  container?: 'psg' | 'vtx' | 'ym' | 'unknown';
+  container?: 'psg' | 'vtx' | 'ym' | 'asc' | 'unknown';
   variant?: string;
   title?: string;
   author?: string;

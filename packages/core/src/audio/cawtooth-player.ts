@@ -8,6 +8,7 @@ import { isSqx } from '../formats/herad/sqx.js';
 import { parsePsg } from '../formats/ay/psg.js';
 import { parseVtx } from '../formats/ay/vtx.js';
 import { parseYm } from '../formats/ay/ym.js';
+import { parseAscToAySong } from '../formats/ay/asc-render.js';
 import type { AySong } from '../formats/ay/types.js';
 import { OplPlayer } from './opl-player.js';
 import { PsidPlayer } from './psid-player.js';
@@ -21,7 +22,7 @@ import type { Player } from './player.js';
  * handle either transparently. `ay` covers PSG / VTX / YM register dumps,
  * which all feed the same AY worklet via `AyPlayer.loadStream`.
  */
-export type DetectedFormat = 'psid' | 'imf' | 'dro' | 'herad' | 'psg' | 'vtx' | 'ym';
+export type DetectedFormat = 'psid' | 'imf' | 'dro' | 'herad' | 'psg' | 'vtx' | 'ym' | 'asc';
 
 /** Per-format runtime URLs. Worklet bundle + wasm module. */
 export interface CawtoothFormatConfig {
@@ -198,6 +199,8 @@ export class CawtoothPlayer {
         return this.loadAy(parseVtx(view), options);
       case 'ym':
         return this.loadAy(parseYm(view), options);
+      case 'asc':
+        return this.loadAy(parseAscToAySong(view), options);
     }
   }
 
@@ -356,6 +359,7 @@ export function detectFormat(bytes: Uint8Array, filename?: string): DetectedForm
     if (ext === 'psg') return 'psg';
     if (ext === 'vtx') return 'vtx';
     if (ext === 'ym') return 'ym';
+    if (ext === 'asc') return 'asc';
   }
 
   throw new Error(

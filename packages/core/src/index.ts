@@ -92,6 +92,19 @@ export { parsePsg } from './formats/ay/psg.js';
 export { parseVtx } from './formats/ay/vtx.js';
 export { parseYm } from './formats/ay/ym.js';
 export { decompressLh5 } from './formats/ay/lh5.js';
+export { parseAsc } from './formats/ay/asc-parser.js';
+export type {
+  AscModule,
+  AscPattern,
+  AscRow,
+  AscCell,
+  AscSample,
+  AscSampleLine,
+  AscOrnament,
+  AscOrnamentLine,
+} from './formats/ay/asc-types.js';
+export { renderAsc, parseAscToAySong, ASC_TICK_RATE } from './formats/ay/asc-render.js';
+export type { RenderAscResult } from './formats/ay/asc-render.js';
 export type { AySong } from './formats/ay/types.js';
 
 export { AY_PROCESSOR_NAME } from './worklet/ay-processor-name.js';
