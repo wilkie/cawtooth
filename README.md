@@ -2,6 +2,8 @@
 
 [![ci](https://github.com/wilkie/cawtooth/actions/workflows/ci.yml/badge.svg)](https://github.com/wilkie/cawtooth/actions/workflows/ci.yml)
 
+![The cawtooth logo which is the head of a crow looking side-eyed at the camera where its profile is roughly triangular and forms the last and third part of a sawtooth wave stylized together. The term 'cawtooth' appears underneath in a somewhat futuristic, sans-serif font.](cawtooth_logo.png)
+
 This is a collection of libraries to handle different chiptune formats and an encompassing
 player.
 
