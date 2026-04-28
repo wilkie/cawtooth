@@ -1,0 +1,20 @@
+{
+  "name": "@cawtooth-examples/ay",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "AY-3-8910 / YM2149 chiptune playback demo — loads a .psg / .vtx / .ym register-dump or a .asc tracker module through CawtoothPlayer's auto-detect path and plays it via the Ayumi-backed AudioWorklet.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "cawtooth": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "vite": "^6.0.0"
+  }
+}

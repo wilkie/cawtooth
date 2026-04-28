@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>cawtooth — AY register-dump playback</title>
+    <style>
+      body {
+        font-family:
+          system-ui,
+          -apple-system,
+          sans-serif;
+        padding: 2rem;
+        max-width: 48rem;
+        margin: 0 auto;
+        line-height: 1.5;
+      }
+      h1 {
+        margin-top: 0;
+      }
+      .row {
+        margin: 0.75rem 0;
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      label {
+        font-size: 0.9rem;
+      }
+      button {
+        font-size: 1rem;
+        padding: 0.5rem 1.25rem;
+        cursor: pointer;
+      }
+      button:disabled {
+        cursor: wait;
+        opacity: 0.6;
+      }
+      select,
+      input[type='file'] {
+        font-size: 0.95rem;
+        padding: 0.35rem 0.5rem;
+      }
+      .status {
+        margin-top: 1rem;
+        padding: 0.75rem 1rem;
+        background: #f4f4f4;
+        border-radius: 4px;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: 0.9rem;
+        white-space: pre-line;
+      }
+      .meta {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 0.25rem 1rem;
+        font-size: 0.9rem;
+        margin-top: 1rem;
+      }
+      .meta dt {
+        font-weight: 600;
+        color: #555;
+      }
+      .meta dd {
+        margin: 0;
+      }
+      code {
+        background: #f4f4f4;
+        padding: 0.1em 0.3em;
+        border-radius: 3px;
+      }
+      h2 {
+        margin-top: 2rem;
+        font-size: 1.1rem;
+      }
+      .scope-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+      }
+      .scope-voice {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .scope-voice canvas {
+        width: 100%;
+        height: 80px;
+        background: #0e1015;
+        border-radius: 3px;
+        display: block;
+      }
+      .scope-voice .voice-label {
+        font-size: 0.75rem;
+        color: #666;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        text-align: center;
+      }
+      .progress-row {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-top: 0.75rem;
+      }
+      .progress-bar {
+        flex: 1;
+        height: 6px;
+        background: #eaeaea;
+        border-radius: 3px;
+        overflow: hidden;
+      }
+      .progress-fill {
+        height: 100%;
+        background: #4a6cf7;
+        width: 0%;
+        transition: width 80ms linear;
+      }
+      .time-elapsed,
+      .time-total {
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: 0.85rem;
+        color: #666;
+        min-width: 3em;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>cawtooth — AY register-dump playback</h1>
+    <p>
+      Plays an AY-3-8910 / YM2149 register-dump file (<code>.psg</code>, <code>.vtx</code>,
+      <code>.ym</code>) or an ASC Sound Master tracker module (<code>.asc</code>) through
+      <code>CawtoothPlayer</code>'s auto-detect path. Register-dump files are sniffed by magic,
+      decompressed (LH5 for VTX/YM), and de-interleaved into a register-write event stream;
+      ASC modules are first parsed and then run through cawtooth's in-process replay engine.
+      Either way the result is fed to the same Ayumi-backed AudioWorklet the chord demo uses.
+      A built-in synthetic PSG sample loads on first play if nothing else is selected.
+    </p>
+    <div class="row">
+      <label>
+        Tune:
+        <select id="source">
+          <option value="builtin" selected>
+            Built-in PSG sample (synthetic chord progression)
+          </option>
+          <option value="picker">Upload a .psg / .vtx / .ym / .asc file…</option>
+        </select>
+      </label>
+      <input id="file" type="file" accept=".psg,.vtx,.ym,.asc" style="display: none" />
+    </div>
+    <div class="row">
+      <button id="play">Play</button>
+      <button id="pause">Pause</button>
+      <button id="stop">Stop</button>
+      <label>
+        <input id="loop" type="checkbox" />
+        Loop
+      </label>
+    </div>
+
+    <dl class="meta" id="meta" hidden>
+      <dt>Format</dt>
+      <dd id="meta-format"></dd>
+      <dt>Title</dt>
+      <dd id="meta-title"></dd>
+      <dt>Author</dt>
+      <dd id="meta-author"></dd>
+      <dt>Comment</dt>
+      <dd id="meta-comment"></dd>
+      <dt>Chip</dt>
+      <dd id="meta-chip"></dd>
+      <dt>Clock</dt>
+      <dd id="meta-clock"></dd>
+      <dt>Tick rate</dt>
+      <dd id="meta-tick-rate"></dd>
+      <dt>Events</dt>
+      <dd id="meta-events"></dd>
+    </dl>
+
+    <div class="progress-row">
+      <span class="time-elapsed" id="progress-elapsed">0:00</span>
+      <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+      <span class="time-total" id="progress-total">—</span>
+    </div>
+
+    <div class="status" id="status">idle — click Play to initialize</div>
+
+    <h2>Per-voice oscilloscope</h2>
+    <p style="color: #666; font-size: 0.9rem; margin-top: -0.25rem">
+      Three canvases — one per AY tone channel (A / B / C). Samples are pre-pan, pre-mix DAC values
+      from Ayumi, sampled at the audio output rate. Amplitude is auto-scaled per voice so a single
+      gated note fills its canvas even though its raw level sits well below the chip's mix peak.
+    </p>
+    <div class="scope-grid" id="scope"></div>
+  </body>
+  <script type="module" src="/src/main.ts"></script>
+</html>
