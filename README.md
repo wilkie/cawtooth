@@ -11,7 +11,7 @@ player.
 
 - **DRO**: The DOSBox Raw OPL format which just describes the OPL2/3 AdLib commands that were, typically, captured during emulation, although this format is a versatile format to which we can export most other OPL formats.
 - **IMF**, **WLF**: Id Software Music Format housing OPL2 AdLib commands from earlier Id Software games such as Commander Keen and Wolfenstein 3D
-- **HSQ**, **SQX**, **AGD**, **HA2**: Cryo's HERAD music format that was used to sequence OPL2/3 AdLib music in games such as Dune,
+- **HSQ**, **SQX**, **AGD**, **HA2**: Cryo's HERAD music format that was used to sequence OPL2/3 AdLib music in games such as Dune, Megarace, and KGB.
 - **SID**: The PSID format which contains Commodore 64 instructions that are emulated to produce music for the SID chip.
 - **AY-3-8910 / YM2149**: chip support for the General Instrument PSG used by the ZX Spectrum 128, Atari ST, Amstrad CPC, MSX, and many arcade machines. The library ships the chip emulator plus parsers for the three major register-dump container formats:
   - **PSG**: the simple uncompressed ZX Spectrum register-dump format used by AY Emul and many demoscene utilities.
