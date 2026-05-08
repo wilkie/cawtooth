@@ -1,16 +1,20 @@
 import {
   AyPlayer,
   CawtoothPlayer,
+  SndhPlayer,
   type AyPlayerInfo,
   type Player,
   type ProgressInfo,
+  type SndhPlayerInfo,
 } from 'cawtooth';
 import oplWorkletUrl from 'cawtooth/worklet/opl?url';
 import psidWorkletUrl from 'cawtooth/worklet/psid?url';
 import ayWorkletUrl from 'cawtooth/worklet/ay?url';
+import sndhWorkletUrl from 'cawtooth/worklet/sndh?url';
 import oplWasmUrl from 'cawtooth/wasm/nuked-opl3.wasm?url';
 import sidplayWasmUrl from 'cawtooth/wasm/sidplay.wasm?url';
 import ayumiWasmUrl from 'cawtooth/wasm/ayumi.wasm?url';
+import sndhWasmUrl from 'cawtooth/wasm/sndh.wasm?url';
 import { createOscilloscope, type Oscilloscope } from './oscilloscope.js';
 
 const statusEl = document.getElementById('status') as HTMLElement;
@@ -170,6 +174,28 @@ function renderMeta(info: AyPlayerInfo): void {
   metaEl.hidden = false;
 }
 
+function renderSndhMeta(info: SndhPlayerInfo): void {
+  // SNDH is m68k binary playback, so "register writes" / tickRate /
+  // chip-model fields don't apply — substitute the equivalent SNDH-side
+  // signals (subsong count, m68k cycles per play, ripper credit).
+  metaFormat.textContent =
+    `SNDH${info.subsongCount > 1 ? ` (${info.subsongCount} subsongs)` : ''}`;
+  metaTitle.textContent = info.title || '(unnamed)';
+  metaAuthor.textContent = info.composer || '(unknown)';
+  const credits: string[] = [];
+  if (info.year) credits.push(info.year);
+  if (info.ripper) credits.push(`ripped by ${info.ripper}`);
+  if (info.converter) credits.push(`converted by ${info.converter}`);
+  metaComment.textContent = credits.join(' · ');
+  metaChip.textContent = 'YM2149 (Atari ST)';
+  metaClock.textContent = `${info.clockFrequency.toLocaleString()} Hz (m68k)`;
+  // Cycles → Hz: timer fires `clock / cyclesPerPlay` times per second.
+  const playHz = info.playInterval > 0 ? Math.round(info.clockFrequency / info.playInterval) : 0;
+  metaTickRate.textContent = `${playHz} Hz play (${info.playInterval.toLocaleString()} cycles)`;
+  metaEvents.textContent = 'driven by m68k binary';
+  metaEl.hidden = false;
+}
+
 sourceSel.addEventListener('change', () => {
   fileInput.style.display = sourceSel.value === 'picker' ? '' : 'none';
   if (sourceSel.value === 'picker') fileInput.click();
@@ -189,12 +215,13 @@ async function ensureFactory(): Promise<CawtoothPlayer> {
     formats: {
       // The full set of formats is wired in so the same factory can
       // load a stray .sid or .imf file the user happens to drop in,
-      // even though the picker filters to .psg / .vtx / .ym / .asc.
+      // even though the picker filters to .psg / .vtx / .ym / .asc / .sndh.
       // Costs nothing to register since the worklet/wasm aren't actually
       // fetched until the corresponding format is loaded.
       ay: { workletUrl: ayWorkletUrl, wasmUrl: ayumiWasmUrl },
       opl: { workletUrl: oplWorkletUrl, wasmUrl: oplWasmUrl },
       psid: { workletUrl: psidWorkletUrl, wasmUrl: sidplayWasmUrl },
+      sndh: { workletUrl: sndhWorkletUrl, wasmUrl: sndhWasmUrl },
     },
   });
   return factory;
@@ -227,10 +254,10 @@ playBtn.addEventListener('click', async () => {
     }
 
     player = await fac.load(bytes, { filename, loop: loopChk.checked });
-    if (!(player instanceof AyPlayer)) {
+    if (!(player instanceof AyPlayer) && !(player instanceof SndhPlayer)) {
       throw new Error(
-        `loaded a ${player.format} file, but this demo only displays AY tunes — ` +
-          `try the SID, IMF, or unified Player demo for other formats`,
+        `loaded a ${player.format} file, but this demo only displays AY / SNDH tunes — ` +
+          `try the SID or IMF demo for other formats`,
       );
     }
 
@@ -238,6 +265,7 @@ playBtn.addEventListener('click', async () => {
     await player.resumeAudio();
 
     if (player.info.format === 'ay') renderMeta(player.info);
+    else if (player.info.format === 'sndh') renderSndhMeta(player.info);
 
     unsubscribeScope = player.onChannels(scope.ingest);
     scope.start();
@@ -246,7 +274,10 @@ playBtn.addEventListener('click', async () => {
     player.onProgress(updateProgress);
 
     player.onEnded(() => {
-      if (player && player.info.format === 'ay') {
+      if (!player) return;
+      if (player.info.format === 'ay') {
+        setStatus(`finished — "${player.info.title || '(unnamed)'}"`);
+      } else if (player.info.format === 'sndh') {
         setStatus(`finished — "${player.info.title || '(unnamed)'}"`);
       }
     });
@@ -258,6 +289,12 @@ playBtn.addEventListener('click', async () => {
       setStatus(
         `playing — ${player.info.container.toUpperCase()} on ${player.info.model} @ ${player.info.tickRate} Hz`,
       );
+    } else if (player.info.format === 'sndh') {
+      const playHz =
+        player.info.playInterval > 0
+          ? Math.round(player.info.clockFrequency / player.info.playInterval)
+          : 0;
+      setStatus(`playing — SNDH on YM2149 @ ${playHz} Hz play tick`);
     }
   } catch (err) {
     setStatus(`error: ${err instanceof Error ? err.message : String(err)}`);

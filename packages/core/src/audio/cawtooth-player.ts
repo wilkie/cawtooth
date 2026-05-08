@@ -10,9 +10,11 @@ import { parseVtx } from '../formats/ay/vtx.js';
 import { parseYm } from '../formats/ay/ym.js';
 import { parseAscToAySong } from '../formats/ay/asc-render.js';
 import type { AySong } from '../formats/ay/types.js';
+import { parseSndh } from '../formats/sndh/parser.js';
 import { OplPlayer } from './opl-player.js';
 import { PsidPlayer } from './psid-player.js';
 import { AyPlayer } from './ay-player.js';
+import { SndhPlayer } from './sndh-player.js';
 import type { Player } from './player.js';
 
 /**
@@ -22,7 +24,16 @@ import type { Player } from './player.js';
  * handle either transparently. `ay` covers PSG / VTX / YM register dumps,
  * which all feed the same AY worklet via `AyPlayer.loadStream`.
  */
-export type DetectedFormat = 'psid' | 'imf' | 'dro' | 'herad' | 'psg' | 'vtx' | 'ym' | 'asc';
+export type DetectedFormat =
+  | 'psid'
+  | 'imf'
+  | 'dro'
+  | 'herad'
+  | 'psg'
+  | 'vtx'
+  | 'ym'
+  | 'asc'
+  | 'sndh';
 
 /** Per-format runtime URLs. Worklet bundle + wasm module. */
 export interface CawtoothFormatConfig {
@@ -36,14 +47,18 @@ export interface CawtoothPlayerOptions {
    * trying to load a tune for a format the caller hasn't configured
    * throws a descriptive error rather than failing silently.
    *
-   * The two keys cover every format the factory can dispatch:
+   * The keys cover every format the factory can dispatch:
    *   - `opl`  — drives IMF, DRO, and HERAD playback through the OPL3 wasm
    *   - `psid` — drives PSID and RSID playback through the sidplay wasm
+   *   - `ay`   — drives PSG / VTX / YM / ASC playback through the ayumi wasm
+   *   - `sndh` — drives SNDH (Atari ST) playback through the sndh wasm
+   *              (Musashi 68000 + Ayumi YM2149 in one module)
    */
   formats: {
     opl?: CawtoothFormatConfig;
     psid?: CawtoothFormatConfig;
     ay?: CawtoothFormatConfig;
+    sndh?: CawtoothFormatConfig;
   };
   /**
    * Shared AudioContext. Created on demand if omitted. Sharing one
@@ -201,6 +216,17 @@ export class CawtoothPlayer {
         return this.loadAy(parseYm(view), options);
       case 'asc':
         return this.loadAy(parseAscToAySong(view), options);
+      case 'sndh': {
+        const cfg = this.requireFormat('sndh');
+        const song = parseSndh(view);
+        return SndhPlayer.create({
+          workletUrl: cfg.workletUrl,
+          wasmUrl: cfg.wasmUrl,
+          song,
+          audioContext: this.ctx,
+          subsong: options.subsong,
+        });
+      }
     }
   }
 
@@ -249,7 +275,7 @@ export class CawtoothPlayer {
     }
   }
 
-  private requireFormat(name: 'opl' | 'psid' | 'ay'): CawtoothFormatConfig {
+  private requireFormat(name: 'opl' | 'psid' | 'ay' | 'sndh'): CawtoothFormatConfig {
     const cfg = this.formats[name];
     if (!cfg) {
       throw new Error(
@@ -271,9 +297,11 @@ export class CawtoothPlayer {
  *   4. YM raw    — 'YM5!' or 'YM6!' at offset 0.
  *   5. YM-in-LHA — '-lh5-' at offset 2 (LHA level-0/1 wrapper). Filename
  *                  hint disambiguates from other LHA archives.
- *   6. VTX       — lowercase 'ay' or 'ym' at offset 0.
- *   7. HSQ / SQX — HERAD-compressed wrappers (heuristic).
- *   8. filename  — fallback for raw IMF and decompressed HERAD.
+ *   6. SNDH      — 4-byte 'SNDH' magic at offset 0x0C, after the three
+ *                  `BRA.W` entry-point branches.
+ *   7. VTX       — lowercase 'ay' or 'ym' at offset 0.
+ *   8. HSQ / SQX — HERAD-compressed wrappers (heuristic).
+ *   9. filename  — fallback for raw IMF and decompressed HERAD.
  *
  * Throws when nothing matches. Pass `options.format` to `load()` to skip.
  */
@@ -335,6 +363,19 @@ export function detectFormat(bytes: Uint8Array, filename?: string): DetectedForm
   ) {
     return 'ym';
   }
+  // SNDH — 'SNDH' at offset 0x0C, sitting after the three BRA.W
+  // instructions that point at init/exit/play. The magic before the
+  // VTX check because VTX's two-byte 'ym' would otherwise capture
+  // SNDH binaries that happen to start with `move.l ...` opcodes.
+  if (
+    bytes.length >= 0x10 &&
+    bytes[0x0c] === 0x53 &&
+    bytes[0x0d] === 0x4e &&
+    bytes[0x0e] === 0x44 &&
+    bytes[0x0f] === 0x48
+  ) {
+    return 'sndh';
+  }
   // VTX: lowercase 'ay' (0x61 0x79) or 'ym' (0x79 0x6d) at offset 0.
   if (bytes.length >= 2) {
     if ((bytes[0] === 0x61 && bytes[1] === 0x79) || (bytes[0] === 0x79 && bytes[1] === 0x6d)) {
@@ -360,6 +401,7 @@ export function detectFormat(bytes: Uint8Array, filename?: string): DetectedForm
     if (ext === 'vtx') return 'vtx';
     if (ext === 'ym') return 'ym';
     if (ext === 'asc') return 'asc';
+    if (ext === 'sndh' || ext === 'snd') return 'sndh';
   }
 
   throw new Error(

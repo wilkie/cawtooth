@@ -126,15 +126,17 @@
     </style>
   </head>
   <body>
-    <h1>cawtooth — AY register-dump playback</h1>
+    <h1>cawtooth — AY register-dump &amp; SNDH playback</h1>
     <p>
       Plays an AY-3-8910 / YM2149 register-dump file (<code>.psg</code>, <code>.vtx</code>,
-      <code>.ym</code>) or an ASC Sound Master tracker module (<code>.asc</code>) through
-      <code>CawtoothPlayer</code>'s auto-detect path. Register-dump files are sniffed by magic,
-      decompressed (LH5 for VTX/YM), and de-interleaved into a register-write event stream;
-      ASC modules are first parsed and then run through cawtooth's in-process replay engine.
-      Either way the result is fed to the same Ayumi-backed AudioWorklet the chord demo uses.
-      A built-in synthetic PSG sample loads on first play if nothing else is selected.
+      <code>.ym</code>), an ASC Sound Master tracker module (<code>.asc</code>), or an
+      Atari ST <code>.sndh</code> binary through <code>CawtoothPlayer</code>'s auto-detect
+      path. Register-dump files are sniffed by magic, decompressed (LH5 for VTX/YM), and
+      de-interleaved into a register-write event stream; ASC modules are first parsed and
+      then run through cawtooth's in-process replay engine; SNDH files are loaded into a
+      simulated Atari ST and played back by running their original m68k code on Musashi
+      with the YM register writes routed straight to Ayumi. A built-in synthetic PSG
+      sample loads on first play if nothing else is selected.
     </p>
     <div class="row">
       <label>
@@ -143,10 +145,10 @@
           <option value="builtin" selected>
             Built-in PSG sample (synthetic chord progression)
           </option>
-          <option value="picker">Upload a .psg / .vtx / .ym / .asc file…</option>
+          <option value="picker">Upload a .psg / .vtx / .ym / .asc / .sndh file…</option>
         </select>
       </label>
-      <input id="file" type="file" accept=".psg,.vtx,.ym,.asc" style="display: none" />
+      <input id="file" type="file" accept=".psg,.vtx,.ym,.asc,.sndh" style="display: none" />
     </div>
     <div class="row">
       <button id="play">Play</button>

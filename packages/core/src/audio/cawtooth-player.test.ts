@@ -95,4 +95,20 @@ describe('detectFormat', () => {
     expect(detectFormat(bytes, 'tune.vtx')).toBe('vtx');
     expect(detectFormat(bytes, 'tune.ym')).toBe('ym');
   });
+
+  it('identifies SNDH by its 4-byte magic at offset 0x0C', () => {
+    // 12 bytes of BRA.W stubs + 'SNDH' + a HDNS terminator. Anything
+    // valid at the entry-point slots is fine — the magic is what we sniff.
+    const bytes = new Uint8Array(0x18);
+    bytes.set([0x60, 0x00, 0x00, 0x10, 0x60, 0x00, 0x00, 0x10, 0x60, 0x00, 0x00, 0x10], 0);
+    bytes.set([0x53, 0x4e, 0x44, 0x48], 0x0c); // 'SNDH'
+    bytes.set([0x48, 0x44, 0x4e, 0x53], 0x10); // 'HDNS'
+    expect(detectFormat(bytes)).toBe('sndh');
+  });
+
+  it('falls back to filename extension for SNDH', () => {
+    const bytes = new Uint8Array([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+    expect(detectFormat(bytes, 'tune.sndh')).toBe('sndh');
+    expect(detectFormat(bytes, 'tune.snd')).toBe('sndh');
+  });
 });

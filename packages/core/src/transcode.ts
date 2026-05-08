@@ -95,6 +95,7 @@ export function parseOpl(
     case 'vtx':
     case 'ym':
     case 'asc':
+    case 'sndh':
       // Recognized non-OPL containers — caller can branch via the null.
       return null;
   }

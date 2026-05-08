@@ -64,11 +64,13 @@ const oplWorkletConfig = workletConfig('src/worklet/opl-processor.ts', 'opl-proc
 const sidWorkletConfig = workletConfig('src/worklet/sid-processor.ts', 'sid-processor.js');
 const psidWorkletConfig = workletConfig('src/worklet/psid-processor.ts', 'psid-processor.js');
 const ayWorkletConfig = workletConfig('src/worklet/ay-processor.ts', 'ay-processor.js');
+const sndhWorkletConfig = workletConfig('src/worklet/sndh-processor.ts', 'sndh-processor.js');
 
 export default defineConfig(({ mode }) => {
   if (mode === 'worklet') return oplWorkletConfig;
   if (mode === 'worklet-sid') return sidWorkletConfig;
   if (mode === 'worklet-psid') return psidWorkletConfig;
   if (mode === 'worklet-ay') return ayWorkletConfig;
+  if (mode === 'worklet-sndh') return sndhWorkletConfig;
   return libConfig;
 });
