@@ -18,6 +18,7 @@ NUKED_DIR="$SCRIPT_DIR/nuked-opl3"
 RESID_DIR="$SCRIPT_DIR/resid/src"
 FAKE_DIR="$SCRIPT_DIR/fake6502"
 AYUMI_DIR="$SCRIPT_DIR/ayumi"
+MUSASHI_DIR="$SCRIPT_DIR/musashi"
 NATIVE_DIR="$REPO_ROOT/packages/core/native"
 WASM_DIR="$REPO_ROOT/packages/core/wasm"
 
@@ -48,6 +49,11 @@ fi
 
 if [ ! -f "$AYUMI_DIR/ayumi.c" ]; then
   echo "Error: Ayumi not vendored. Run: tools/setup-ayumi.sh"
+  exit 1
+fi
+
+if [ ! -f "$MUSASHI_DIR/m68kcpu.c" ] || [ ! -f "$MUSASHI_DIR/m68kops.c" ]; then
+  echo "Error: Musashi not vendored. Run: tools/setup-musashi.sh"
   exit 1
 fi
 
@@ -219,3 +225,57 @@ emcc \
 echo ""
 echo "==> Built: $WASM_DIR/ayumi.wasm"
 ls -lh "$WASM_DIR/ayumi.wasm"
+
+SNDH_EXPORTS='[
+  "_cawtooth_sndh_create",
+  "_cawtooth_sndh_destroy",
+  "_cawtooth_sndh_load",
+  "_cawtooth_sndh_init",
+  "_cawtooth_sndh_get_play_interval",
+  "_cawtooth_sndh_generate",
+  "_cawtooth_sndh_generate_channels",
+  "_cawtooth_sndh_set_pan",
+  "_cawtooth_sndh_peek",
+  "_cawtooth_sndh_reset_chip",
+  "_malloc",
+  "_free"
+]'
+
+echo ""
+echo "==> Compiling Musashi + Ayumi + SNDH wrapper to WASM"
+# Musashi's m68kcpu.c #includes m68kfpu.c and m68kmmu.h directly, so
+# only m68kcpu.c + m68kops.c go on the compile line — feeding m68kfpu.c
+# separately would duplicate-define m68040_fpu_op0/op1.
+# softfloat is required by m68kfpu.c for FPU/MMU paths even on a 68000
+# build (the M68K_EMULATE_040 / M68K_EMULATE_PMMU defaults stay ON).
+# -sSUPPORT_LONGJMP=0 disables Emscripten's setjmp/longjmp shims (which
+# would otherwise need invoke_* JS imports incompatible with
+# STANDALONE_WASM). Musashi only uses setjmp for the bus-error trap,
+# which never fires on healthy SNDH playback — the wrapper validates
+# every memory access before delegation, so nothing reaches longjmp.
+# 16 MiB initial memory: 4 MiB for the simulated Atari ST RAM is
+# baked into the wrapper as a static array, plus headroom for malloc
+# and the WASM stack. -msimd128 helps Ayumi's FIR decimator.
+emcc \
+  -O3 \
+  -DNDEBUG \
+  -msimd128 \
+  -I "$MUSASHI_DIR" \
+  -I "$MUSASHI_DIR/softfloat" \
+  -I "$AYUMI_DIR" \
+  "$MUSASHI_DIR/m68kcpu.c" \
+  "$MUSASHI_DIR/m68kops.c" \
+  "$MUSASHI_DIR/softfloat/softfloat.c" \
+  "$AYUMI_DIR/ayumi.c" \
+  "$NATIVE_DIR/sndh-wrapper.c" \
+  -o "$WASM_DIR/sndh.wasm" \
+  -sSTANDALONE_WASM=1 \
+  -sALLOW_MEMORY_GROWTH=1 \
+  -sINITIAL_MEMORY=16777216 \
+  -sSUPPORT_LONGJMP=0 \
+  -sEXPORTED_FUNCTIONS="$SNDH_EXPORTS" \
+  --no-entry
+
+echo ""
+echo "==> Built: $WASM_DIR/sndh.wasm"
+ls -lh "$WASM_DIR/sndh.wasm"

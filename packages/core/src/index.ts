@@ -165,6 +165,16 @@ export {
 } from './formats/psid/sidplay-loader.js';
 export type { SidplayExports } from './formats/psid/sidplay-loader.js';
 
+export { parseSndh } from './formats/sndh/parser.js';
+export type { SndhSong, SndhTimer } from './formats/sndh/types.js';
+export {
+  asSndhExports,
+  compileSndh,
+  createSndhImports,
+  instantiateSndh,
+} from './formats/sndh/sndh-loader.js';
+export type { SndhExports } from './formats/sndh/sndh-loader.js';
+
 export { PsidPlayer } from './audio/psid-player.js';
 export type { PsidPlayerCreateOptions } from './audio/psid-player.js';
 
