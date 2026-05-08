@@ -174,12 +174,28 @@ export {
   instantiateSndh,
 } from './formats/sndh/sndh-loader.js';
 export type { SndhExports } from './formats/sndh/sndh-loader.js';
+export {
+  SndhTune,
+  SNDH_VOICE_COUNT,
+  ATARI_ST_PAL_CLOCK,
+  ATARI_ST_NTSC_CLOCK,
+  ATARI_ST_YM2149_CLOCK,
+} from './formats/sndh/runtime.js';
+export type { SndhTuneOptions } from './formats/sndh/runtime.js';
+export { SndhPlayer } from './audio/sndh-player.js';
+export type { SndhPlayerCreateOptions } from './audio/sndh-player.js';
 
 export { PsidPlayer } from './audio/psid-player.js';
 export type { PsidPlayerCreateOptions } from './audio/psid-player.js';
 
 export { Player } from './audio/player.js';
-export type { AyPlayerInfo, OplPlayerInfo, PlayerInfo, PsidPlayerInfo } from './audio/player.js';
+export type {
+  AyPlayerInfo,
+  OplPlayerInfo,
+  PlayerInfo,
+  PsidPlayerInfo,
+  SndhPlayerInfo,
+} from './audio/player.js';
 export type { OplLoadStreamMetadata } from './audio/opl-player.js';
 
 export { CawtoothPlayer, detectFormat } from './audio/cawtooth-player.js';

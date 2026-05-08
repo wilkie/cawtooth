@@ -9,7 +9,7 @@ import type { EndedListener, ProgressListener } from './player-events.js';
  * `isPlaying` semantics on the parent `Player`; this type is for the
  * intrinsic, mostly-static description of the loaded tune.
  */
-export type PlayerInfo = OplPlayerInfo | PsidPlayerInfo | AyPlayerInfo;
+export type PlayerInfo = OplPlayerInfo | PsidPlayerInfo | AyPlayerInfo | SndhPlayerInfo;
 
 export interface OplPlayerInfo {
   readonly format: 'opl';
@@ -71,6 +71,27 @@ export interface PsidPlayerInfo {
   readonly playInterval: number;
 }
 
+export interface SndhPlayerInfo {
+  readonly format: 'sndh';
+  readonly title: string;
+  /** Composer / author from the SNDH `COMM` tag. */
+  readonly composer: string;
+  /** Person who ripped the tune from its original disk image. */
+  readonly ripper: string;
+  /** Person who converted the ripped tune to SNDH format. */
+  readonly converter: string;
+  /** Release year as authored — opaque string (e.g. `"1987"`). */
+  readonly year: string;
+  /** Total subsongs in the file. */
+  readonly subsongCount: number;
+  /** Currently-active subsong (1-based). Mutated by `selectSong()`. */
+  readonly subsong: number;
+  /** 68000 clock in Hz (PAL ≈ 8010613, NTSC ≈ 8053977). */
+  readonly clockFrequency: number;
+  /** m68k cycles between play-routine invocations. */
+  readonly playInterval: number;
+}
+
 /**
  * Abstract base for every cawtooth audio player. Subclasses (`OplPlayer`,
  * `PsidPlayer`) implement format-specific transport plumbing on top of a
@@ -120,7 +141,7 @@ export abstract class Player {
     }
   }
 
-  abstract get format(): 'opl' | 'psid' | 'ay';
+  abstract get format(): 'opl' | 'psid' | 'ay' | 'sndh';
   abstract get info(): PlayerInfo;
 
   /** Begin / resume audio production. */
