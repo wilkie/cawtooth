@@ -24,6 +24,8 @@ const stopBtn = document.getElementById('stop') as HTMLButtonElement;
 const sourceSel = document.getElementById('source') as HTMLSelectElement;
 const fileInput = document.getElementById('file') as HTMLInputElement;
 const loopChk = document.getElementById('loop') as HTMLInputElement;
+const subsongRow = document.getElementById('subsong-row') as HTMLElement;
+const subsongSel = document.getElementById('subsong') as HTMLSelectElement;
 const metaEl = document.getElementById('meta') as HTMLElement;
 const metaFormat = document.getElementById('meta-format') as HTMLElement;
 const metaTitle = document.getElementById('meta-title') as HTMLElement;
@@ -174,6 +176,32 @@ function renderMeta(info: AyPlayerInfo): void {
   metaEl.hidden = false;
 }
 
+function populateSubsongPicker(player: SndhPlayer): void {
+  const { subsongCount, subsong } = player.info;
+  if (subsongCount <= 1) {
+    subsongRow.hidden = true;
+    subsongSel.innerHTML = '';
+    return;
+  }
+  // Rebuild option list. Each label includes the TIME-tag duration when
+  // the file declared one; otherwise just the subsong number.
+  subsongSel.innerHTML = '';
+  for (let n = 1; n <= subsongCount; n++) {
+    const opt = document.createElement('option');
+    opt.value = String(n);
+    const dur = player.durationForSubsong(n);
+    opt.textContent = dur !== null ? `${n} (${formatMmSs(dur)})` : `${n}`;
+    if (n === subsong) opt.selected = true;
+    subsongSel.appendChild(opt);
+  }
+  subsongRow.hidden = false;
+}
+
+function hideSubsongPicker(): void {
+  subsongRow.hidden = true;
+  subsongSel.innerHTML = '';
+}
+
 function renderSndhMeta(info: SndhPlayerInfo): void {
   // SNDH is m68k binary playback, so "register writes" / tickRate /
   // chip-model fields don't apply — substitute the equivalent SNDH-side
@@ -264,8 +292,13 @@ playBtn.addEventListener('click', async () => {
     player.output.connect(player.audioContext.destination);
     await player.resumeAudio();
 
-    if (player.info.format === 'ay') renderMeta(player.info);
-    else if (player.info.format === 'sndh') renderSndhMeta(player.info);
+    if (player.info.format === 'ay') {
+      renderMeta(player.info);
+      hideSubsongPicker();
+    } else if (player.info.format === 'sndh') {
+      renderSndhMeta(player.info);
+      populateSubsongPicker(player as SndhPlayer);
+    }
 
     unsubscribeScope = player.onChannels(scope.ingest);
     scope.start();
@@ -319,4 +352,17 @@ stopBtn.addEventListener('click', () => {
   player.stop();
   updateProgress({ currentTimeSec: 0, durationSec: null });
   setStatus('stopped (rewound to start)');
+});
+
+subsongSel.addEventListener('change', () => {
+  if (!(player instanceof SndhPlayer)) return;
+  const n = Number(subsongSel.value);
+  if (!Number.isFinite(n) || n < 1) return;
+  player.selectSong(n);
+  // Re-render meta + reset progress display so the duration label
+  // reflects the new subsong's TIME-tag entry. selectSong already
+  // applied this synchronously to player.duration.
+  renderSndhMeta(player.info);
+  updateProgress({ currentTimeSec: 0, durationSec: player.duration });
+  setStatus(`switched to subsong ${n}`);
 });

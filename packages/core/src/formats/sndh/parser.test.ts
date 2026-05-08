@@ -99,4 +99,30 @@ describe('parseSndh', () => {
     expect(song.title).toBe('');
     expect(song.flags).toBe('');
   });
+
+  it('treats a bare `!V` tag as VBL @ 50 Hz', () => {
+    // SNDH convention: `!V` with no trailing digits means "use vertical
+    // blank interrupt", which on PAL Atari ST is 50 Hz. Our parser used
+    // to drop the tag entirely (frequency parsed to NaN) — verify it now
+    // installs the correct default.
+    const meta = [
+      0x60, 0x00, 0x00, 0x18, 0x60, 0x00, 0x00, 0x18, 0x60, 0x00, 0x00, 0x18,
+      0x53, 0x4e, 0x44, 0x48, // 'SNDH'
+      0x21, 0x56, 0x00,       // '!V\0'  (bare, no frequency)
+      0x48, 0x44, 0x4e, 0x53, // 'HDNS'
+    ];
+    const song = parseSndh(new Uint8Array(meta));
+    expect(song.timer).toEqual({ type: 'V', frequencyHz: 50 });
+  });
+
+  it('still honours `!V60` for an NTSC-style explicit VBL frequency', () => {
+    const meta = [
+      0x60, 0x00, 0x00, 0x1a, 0x60, 0x00, 0x00, 0x1a, 0x60, 0x00, 0x00, 0x1a,
+      0x53, 0x4e, 0x44, 0x48, // 'SNDH'
+      0x21, 0x56, 0x36, 0x30, 0x00, // '!V60\0'
+      0x48, 0x44, 0x4e, 0x53, // 'HDNS'
+    ];
+    const song = parseSndh(new Uint8Array(meta));
+    expect(song.timer).toEqual({ type: 'V', frequencyHz: 60 });
+  });
 });

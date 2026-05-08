@@ -114,7 +114,9 @@ export function parseSndh(bytes: Uint8Array): SndhSong {
     }
 
     // Timer tags use a 2-char prefix and embed the frequency in the
-    // same null-terminated run (`TC50\0`).
+    // same null-terminated run (`TC50\0`). A bare `!V\0` (no digits) is
+    // shorthand for "VBL @ 50 Hz", which we apply as the default when
+    // the frequency parses to NaN.
     const prefix2 = lookahead.slice(0, 2);
     const tType = timerTypeOf(prefix2);
     if (tType !== undefined) {
@@ -122,6 +124,8 @@ export function parseSndh(bytes: Uint8Array): SndhSong {
       const freq = parseInt(r.text, 10);
       if (Number.isFinite(freq) && freq > 0) {
         timer = { type: tType, frequencyHz: freq };
+      } else if (tType === 'V') {
+        timer = { type: 'V', frequencyHz: 50 };
       }
       off = r.nextOff;
       continue;

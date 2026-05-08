@@ -54,15 +54,25 @@ export class SndhPlayer extends Player {
   private durationSec: number | null = null;
   private playing = false;
   private endedFired = false;
+  /**
+   * Per-subsong durations (seconds) parsed from the SNDH TIME tag.
+   * Empty when the file doesn't carry one. Keyed 0-based even though
+   * subsong numbers are 1-based — so `durations[subsong - 1]`.
+   */
+  private readonly durations: readonly number[];
 
   private constructor(
     ctx: AudioContext,
     ownsContext: boolean,
     node: AudioWorkletNode,
     info: SndhPlayerInfo,
+    durations: readonly number[],
+    initialDurationSec: number | null,
   ) {
     super(ctx, ownsContext, node);
     this._info = { ...info };
+    this.durations = durations;
+    this.durationSec = initialDurationSec;
     this.installMessageDispatcher();
   }
 
@@ -144,7 +154,7 @@ export class SndhPlayer extends Player {
       clockFrequency: ready_.clockFrequency,
       playInterval: ready_.playInterval,
     };
-    return new SndhPlayer(ctx, ownsContext, node, info);
+    return new SndhPlayer(ctx, ownsContext, node, info, song.durations, ready_.durationSec);
   }
 
   get format(): 'sndh' {
@@ -170,14 +180,28 @@ export class SndhPlayer extends Player {
   /**
    * Switch to a different subsong (1-based). Updates `info.subsong` so
    * consumers reading the field see current state. Preserves the
-   * `playing` / `paused` state.
+   * `playing` / `paused` state. The TIME-tag duration for the new
+   * subsong is applied immediately so callers can read `.duration`
+   * without waiting for the next progress message.
    */
   selectSong(subsong: number): void {
     const msg: ToSndhWorkletMessage = { type: 'selectSong', subsong };
     this.node.port.postMessage(msg);
     this._info.subsong = subsong;
     this.currentTimeSec = 0;
+    this.durationSec = this.durationForSubsong(subsong);
     this.endedFired = false;
+  }
+
+  /**
+   * TIME-tag duration in seconds for `subsong` (1-based), or `null`
+   * when the file has no entry / the entry is the spec's "unknown"
+   * zero. Useful for populating subsong-picker labels with durations.
+   */
+  durationForSubsong(subsong: number): number | null {
+    if (subsong < 1 || subsong > this.durations.length) return null;
+    const sec = this.durations[subsong - 1] ?? 0;
+    return sec > 0 ? sec : null;
   }
 
   play(): void {

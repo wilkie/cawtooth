@@ -6,6 +6,17 @@ import { SNDH_PROCESSOR_NAME } from './sndh-processor-name.js';
 /** Minimum seconds between consecutive `progress` messages. */
 const PROGRESS_INTERVAL_SEC = 1 / 20;
 
+/**
+ * Pull the TIME-tag duration for `subsong` (1-based) from a song's
+ * durations array, or return `null` when the file has no entry or the
+ * entry is the spec's "unknown" zero value.
+ */
+function durationFor(durations: readonly number[], subsong: number): number | null {
+  if (subsong < 1 || subsong > durations.length) return null;
+  const sec = durations[subsong - 1] ?? 0;
+  return sec > 0 ? sec : null;
+}
+
 class CawtoothSndhProcessor extends AudioWorkletProcessor {
   private tune: SndhTune | null = null;
   private interleaved: Float32Array | null = null;
@@ -56,6 +67,9 @@ class CawtoothSndhProcessor extends AudioWorkletProcessor {
           this.currentSubsong = subsong;
           this.playing = false;
           this.resetProgress();
+          // Auto-derive duration from the SNDH TIME tag. Caller can
+          // override later via 'setDuration' if they have a better source.
+          this.durationSec = durationFor(msg.song.durations, subsong);
           this.post({
             type: 'ready',
             title: msg.song.title,
@@ -67,6 +81,7 @@ class CawtoothSndhProcessor extends AudioWorkletProcessor {
             subsong,
             clockFrequency: this.tune.clockFrequency,
             playInterval: this.tune.effectivePlayInterval,
+            durationSec: this.durationSec,
           });
         } catch (err) {
           this.post({
@@ -83,6 +98,12 @@ class CawtoothSndhProcessor extends AudioWorkletProcessor {
           // `playing` is preserved: switching subsongs while active
           // continues to play; switching while paused stays paused.
           this.resetProgress();
+          // Update auto-derived duration for the new subsong. The next
+          // progress message picks this up; main thread can also recompute
+          // synchronously from its cached song.durations array.
+          if (this.tune) {
+            this.durationSec = durationFor(this.tune.song.durations, msg.subsong);
+          }
         } catch (err) {
           this.post({
             type: 'error',

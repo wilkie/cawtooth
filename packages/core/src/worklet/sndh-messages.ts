@@ -97,6 +97,13 @@ export interface SndhReadyMessage {
   clockFrequency: number;
   /** m68k cycles between play-routine invocations. */
   playInterval: number;
+  /**
+   * Active subsong's TIME-tag duration in seconds, or `null` when the
+   * SNDH file has no `TIME` tag or the entry is zero (which the spec
+   * interprets as "unknown / indefinite"). Callers may override this
+   * via {@link SndhSetDurationMessage} if they have a better source.
+   */
+  durationSec: number | null;
 }
 
 export interface SndhErrorMessage {
