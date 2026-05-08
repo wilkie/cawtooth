@@ -28,6 +28,7 @@ tools/nuked-opl3/
 tools/resid/
 tools/fake6502/
 tools/ayumi/
+tools/musashi/
 
 # Playwright outputs.
 tests/test-results/

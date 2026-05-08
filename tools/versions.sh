@@ -32,6 +32,13 @@ FAKE6502_COMMIT="b52676f840983219b0b9baa13f1d0ebc07aac9f9"
 # playback; see tools/setup-ayumi.sh.
 AYUMI_COMMIT="07c08b4874c359169e4a028edf73f046d8b763e2"
 
+# Musashi (Karl Stenerud's portable Motorola 680x0 emulator) source
+# commit. MIT licensed — same m68k core MAME uses internally; we vendor
+# Karl's standalone GitHub mirror for an easier WASM build than carving
+# Musashi out of the MAME tree. Used as the CPU core for SNDH (Atari ST)
+# playback, parallel to fake6502's role for PSID. See tools/setup-musashi.sh.
+MUSASHI_COMMIT="313ebf1bd9f4d0d93341eb5ce21fd8a119e9dbdd"
+
 # AdPlug version used for the HERAD A/B harness
 # (tools/adplug-capture/). Not vendored — provided by the system package
 # (Debian: libadplug-dev). The harness is optional; the main test suite
