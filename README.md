@@ -18,6 +18,12 @@ player.
   - **VTX**: the Vortex Tracker container — column-major register dump compressed with LH5, the de-facto AY tracker format.
   - **YM**: the Atari ST tracker format (YM5/YM6 inside an LHA wrapper, also LH5-compressed). Digidrum samples are recognized but not played back.
   - The Z80-bytecode `.ay` format remains a follow-up.
+- **SNDH**: the Atari ST executable music format. Unlike the register-dump
+  containers above, an SNDH file is a real m68k binary with `init`, `exit`,
+  and `play` entry points; cawtooth runs the original code on a vendored
+  Musashi 68000 core and watches its writes to the YM2149 to produce audio.
+  Subsong selection and the standard `TITL` / `COMM` / `RIPP` / `CONV` /
+  `TIME` / `TC` tags are parsed.
 
 ## Installation
 
@@ -27,8 +33,8 @@ npm install cawtooth
 
 The package ships ESM + CJS bundles, generated `.d.ts` files, the bundled
 AudioWorklet processors (under `cawtooth/worklet/opl`, `cawtooth/worklet/sid`,
-`cawtooth/worklet/psid`, `cawtooth/worklet/ay`), and the WebAssembly chip
-emulators (under `cawtooth/wasm/*.wasm`). Most browser bundlers can resolve
+`cawtooth/worklet/psid`, `cawtooth/worklet/ay`, `cawtooth/worklet/sndh`), and
+the WebAssembly chip emulators (under `cawtooth/wasm/*.wasm`). Most browser bundlers can resolve
 these via the `?url` import suffix — see the examples for the exact wiring.
 
 ## Examples
@@ -67,15 +73,15 @@ progress UIs and per-voice oscilloscopes.
 
 If you only need the format identifier (e.g. for routing or display) without
 constructing a player, use `detectFormat` directly. It sniffs PSID/RSID, DRO,
-PSG, raw YM5/YM6, VTX (`ay`/`ym` magic), and HSQ/SQX-compressed HERAD from
-magic bytes; for IMF, decompressed HERAD, and LHA-wrapped YM, which need a
-hint, it falls back to a filename extension.
+PSG, raw YM5/YM6, SNDH, VTX (`ay`/`ym` magic), and HSQ/SQX-compressed HERAD
+from magic bytes; for IMF, decompressed HERAD, LHA-wrapped YM, and ASC, which
+need a hint, it falls back to a filename extension.
 
 ```ts
 import { detectFormat } from 'cawtooth';
 
 const fmt = detectFormat(new Uint8Array(bytes), 'tune.imf');
-// → 'psid' | 'imf' | 'dro' | 'herad' | 'psg' | 'vtx' | 'ym'
+// → 'psid' | 'imf' | 'dro' | 'herad' | 'psg' | 'vtx' | 'ym' | 'asc' | 'sndh'
 ```
 
 Inside `CawtoothPlayer.load()` this is the same step that picks the parser
@@ -157,7 +163,7 @@ Vite dev server on a fixed port):
 pnpm --filter @cawtooth-examples/player dev    # universal player demo
 pnpm --filter @cawtooth-examples/imf dev       # IMF / WLF demo
 pnpm --filter @cawtooth-examples/sid dev       # PSID / RSID demo
-pnpm --filter @cawtooth-examples/ay dev        # PSG / VTX / YM player demo
+pnpm --filter @cawtooth-examples/ay dev        # PSG / VTX / YM / ASC / SNDH player demo
 pnpm --filter @cawtooth-examples/ay-tone dev   # AY-3-8910 / YM2149 chord demo
 # …also: dro, herad, sid-tone, tone
 ```
@@ -175,7 +181,8 @@ emulator's pinned commit in `tools/versions.sh` — needs Emscripten:
 ./tools/setup-resid.sh        # vendor reSID source
 ./tools/setup-fake6502.sh     # vendor fake6502 source
 ./tools/setup-ayumi.sh        # vendor Ayumi source
-./tools/build-wasm.sh         # compile all four .wasm targets
+./tools/setup-musashi.sh      # vendor Musashi source
+./tools/build-wasm.sh         # compile all five .wasm targets
 ```
 
 Each vendored source lives under `tools/<name>/` and is gitignored. The
@@ -237,6 +244,10 @@ preservation through emulation, reverse engineering, and documentation.
   paired-step AY DAC and the YM's 32-step envelope DAC, with proper
   per-channel pan, DC removal, and 8× FIR-decimated output. Drives all
   ZX Spectrum / Atari ST / Amstrad CPC / MSX chiptune playback.
+- [**Musashi**](https://github.com/kstenerud/Musashi) — portable Motorola
+  680x0 emulator by Karl Stenerud. Acts as the m68k CPU core for SNDH
+  playback, executing the Atari ST binary's `init` / `play` routines while
+  cawtooth observes the writes they make to the YM2149.
 
 **Build toolchain**:
 
